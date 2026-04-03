@@ -1,0 +1,55 @@
+{
+  "expo": {
+    "name": "Steady Path",
+    "slug": "steady-path",
+    "version": "1.0.0",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "scheme": "steadypath",
+    "plugins": [
+      "expo-dev-client",
+      "expo-notifications"
+    ],
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#f5ede4"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.steadypath.app",
+      "buildNumber": "1",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "Steady Path uses the microphone for voice coaching and transcription.",
+        "NSUserNotificationsUsageDescription": "Steady Path uses notifications for reminders and focus session completion."
+      }
+    },
+    "android": {
+      "package": "com.steadypath.app",
+      "permissions": [
+        "RECORD_AUDIO",
+        "POST_NOTIFICATIONS",
+        "VIBRATE"
+      ],
+      "adaptiveIcon": {
+        "backgroundColor": "#f5ede4",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "ce438bdf-5163-4230-872c-22a0a596b311"
+      }
+    }
+  }
+}
