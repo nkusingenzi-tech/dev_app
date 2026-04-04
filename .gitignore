@@ -1,5 +1,6 @@
 # dependencies
 node_modules/
+coverage/
 
 # Expo
 .expo/
@@ -28,6 +29,10 @@ yarn-error.*
 .DS_Store
 *.pem
 
+# editor state
+.idea/
+.vscode/
+
 # local env files
 .env
 .env.*
@@ -42,6 +47,7 @@ yarn-error.*
 
 # local build artifacts
 *.apk
+*.xcresult
 
-# generated native folders
-/ios
+# local review output
+maintainers-review/

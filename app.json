@@ -12,6 +12,7 @@
     "scheme": "steadypath",
     "plugins": [
       "expo-dev-client",
+      "@config-plugins/react-native-webrtc",
       "expo-notifications"
     ],
     "splash": {
