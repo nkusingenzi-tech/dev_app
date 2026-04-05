@@ -1,142 +1,115 @@
 # Steady Path
 
-Steady Path is a cross-platform Expo React Native MVP for a recovery-focused app that helps people reduce porn addiction patterns and compulsive screen use with supportive, non-shaming tools.
+Steady Path is an Expo React Native recovery app with a Bun-native TypeScript coach backend. The mobile app now lives under `src/`, the local API lives under `server/src/`, and the repo contains Android native DNS-filter code plus a generated iOS project for rendering the shared app shell.
 
-## Current MVP
+## Read this first
 
-The mobile foundation currently includes:
+- `AGENTS.md`: repo operating guide for coding agents, architecture boundaries, invariants, and verification rules.
+- `docs/README.md`: technical runtime notes, commands, backend wiring, iOS notes, and commit boundaries.
+- `.specifications/specifications.md`: current implementation-level product and system specification.
+- `docs/content-filter-platform-plan.md`: Android DNS-filter path vs current iOS limitation.
 
-- A recovery-oriented home screen
-- Goal-based onboarding cards
-- Emergency urge tools
-- A daily habit plan
-- Trigger tracking
-- Weekly progress insights
-- A safety note for future clinical and privacy work
+## Current architecture
 
-## Run locally
+- `App.tsx` is intentionally thin and forwards to `src/app/AppRoot.tsx`.
+- `src/app/` owns bootstrap, persisted session state, and app-level services.
+- `src/navigation/` owns the onboarding navigator and the six-tab app shell.
+- `src/features/` owns isolated screens and feature logic for onboarding, today, check-ins, insights, coach, protection, reminders, and storage.
+- `src/domain/` owns shared models and storage constants.
+- `src/ui/` owns reusable mobile UI primitives.
+- `server/src/` owns the Bun server, typed handlers, services, repositories, DTOs, and tests.
+- `android/app/src/main/java/com/steadypath/app/` owns the Android DNS-filter bridge and VPN service.
+- `ios/` is the generated Expo native iOS project used for local iOS builds and development builds.
 
-```bash
-npm install
-npm run start
-```
+## Runtime requirements
 
-## Development build workflow
+- Bun `1.3.11` is the package manager and runtime expected by this repo.
+- Expo CLI is used for the app shell.
+- Full Xcode and CocoaPods are required for local iOS native builds.
+- Android Studio / Android SDK are required for local Android native builds.
 
-This project is now set up to move beyond Expo Go for native-capable features such as notifications, the Android accessibility blocker, and WebRTC voice sessions.
-
-```bash
-npm run start:dev
-npm run android:dev
-npm run ios:dev
-```
-
-Notes:
-
-- `npm run android:dev` now builds the native Android debug variant `com.steadypath.app.dev`
-- Local Android builds require a working JDK and `JAVA_HOME`
-- Expo Go is no longer the target path for the full app feature set
-
-## EAS build profiles
-
-Internal development build:
+## Install
 
 ```bash
-npm run build:android:dev
+cd /Users/macbook/Desktop/workspace/collabs/dev_app
+bun install
 ```
 
-Internal preview APK:
+Only `.env.example` should be committed. Keep real secrets in `.env`, `.env.local`, or shell exports.
+
+## Run the backend
 
 ```bash
-npm run build:android:preview
+cd /Users/macbook/Desktop/workspace/collabs/dev_app
+export OPENAI_API_KEY="sk-..."
+export PORT=8787
+bun run api
 ```
 
-Production Play Store AAB:
+Optional:
 
 ```bash
-npm run build:android:prod
+export CORS_ALLOW_ORIGIN="*"
 ```
 
-Production submission:
+Health check:
 
 ```bash
-npm run submit:android:prod
+curl http://127.0.0.1:8787/health
 ```
 
-`eas.json` now contains separate development, preview, and production profiles.
+## Run the app
 
-## Coach backend
-
-The AI coach can use a local backend for real text responses.
-
-1. Copy `.env.example` to `.env`
-2. Set `OPENAI_API_KEY`
-3. Set `EXPO_PUBLIC_COACH_API_URL` to your computer's local IP, for example `http://192.168.8.124:8787`
-4. Run the backend:
+Shared UI in Expo Go:
 
 ```bash
-npm run api
+cd /Users/macbook/Desktop/workspace/collabs/dev_app
+export EXPO_PUBLIC_COACH_API_URL="http://<your-host-ip>:8787"
+bunx expo start --go --lan -c
 ```
 
-5. Run the app:
+Development build for native-only paths:
 
 ```bash
-npm run start:dev
+cd /Users/macbook/Desktop/workspace/collabs/dev_app
+export EXPO_PUBLIC_COACH_API_URL="http://<your-host-ip>:8787"
+bun run start:dev
 ```
 
-Without backend configuration, the coach falls back to local deterministic replies.
-
-## Voice coach
-
-Current voice coach path:
-
-- microphone capture in the app
-- backend transcription via OpenAI speech-to-text
-- transcript routed through the coach flow
-- spoken reply playback on device
-
-Current realtime status:
-
-- backend Realtime session creation is implemented
-- mobile Realtime voice transport is implemented for development builds via WebRTC
-- Expo Go is not sufficient for the Realtime voice path
-
-## App locker groundwork
-
-Current app-locker status:
-
-- app-side configuration state exists
-- Android native bridge exists
-- Android accessibility service exists
-- targeted apps are synced to Android package names
-- the Plan screen can open Accessibility settings and refresh blocker status
-
-Current native enforcement:
-
-- Android: consumer-style accessibility redirection is implemented
-- iOS: requires Apple Family Controls entitlements and native work
-
-## Content filter direction
-
-The app now also includes a shared `Content filter` product flow in the `Plan` tab.
-
-- shared React Native config is implemented
-- Android DNS-filter VPN path is implemented
-- iOS enforcement still requires Apple Network Extension entitlements and native implementation
-
-See `docs/content-filter-platform-plan.md`.
-
-## Launch targets
+Local iOS native run:
 
 ```bash
-npm run android
-npm run ios
-npm run web
+cd /Users/macbook/Desktop/workspace/collabs/dev_app/ios
+pod install
+
+cd /Users/macbook/Desktop/workspace/collabs/dev_app
+bun run ios
 ```
 
-## Recommended next steps
+Local Android native run:
 
-1. Set up Java and Android SDK paths locally so `npm run android:dev` can compile.
-2. Create an Expo account login and run the EAS build profiles.
-3. Add production signing credentials and Play Console metadata.
-4. Introduce authentication and encrypted backend storage before handling sensitive user data.
+```bash
+cd /Users/macbook/Desktop/workspace/collabs/dev_app
+bun run android
+```
+
+## Verification
+
+```bash
+cd /Users/macbook/Desktop/workspace/collabs/dev_app
+bun run lint
+bun run typecheck
+bun test
+```
+
+CI runs the same checks on every push and pull request.
+
+## Current platform status
+
+- Text coach, reminders, onboarding, check-ins, and insights are shared React Native features.
+- The coach backend is a separate Bun server. Expo QR scanning does not expose that server automatically; the app still needs a reachable `EXPO_PUBLIC_COACH_API_URL`.
+- Text coach falls back to deterministic local replies when the backend is unavailable.
+- Voice transcription and realtime voice depend on the backend.
+- Android has a real native DNS-filter VPN implementation.
+- iOS can render the shared app and run coach/reminder flows, but it does not have a native content-filter implementation or Network Extension target.
+- Expo Go is useful for shared UI validation. Native-only features such as `react-native-webrtc` and the Android content-filter bridge require a development build.

@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "main": "index.ts",
   "scripts": {
-    "api": "node server/index.mjs",
+    "api": "bun server/src/index.ts",
+    "api:watch": "bun --watch server/src/index.ts",
     "start": "expo start",
     "start:dev": "cross-env EXPO_PUBLIC_APP_ENV=development expo start --dev-client",
     "android": "expo run:android",
@@ -15,15 +16,19 @@
     "submit:android:prod": "eas submit --platform android --profile production",
     "ios": "expo run:ios",
     "ios:dev": "expo run:ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "lint": "biome lint App.tsx src server .github package.json biome.json",
+    "lint:fix": "biome check --write App.tsx src server .github package.json biome.json",
+    "test": "bun test",
+    "test:e2e": "bun test server/src/app/startServer.e2e.test.ts",
+    "typecheck": "bunx tsc --noEmit"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-navigation/bottom-tabs": "^7.15.8",
     "@react-navigation/native": "^7.2.1",
+    "@react-navigation/native-stack": "^7.14.10",
     "@types/react": "~19.1.10",
-    "cors": "^2.8.6",
-    "dotenv": "^17.3.1",
     "expo": "^54.0.0",
     "expo-av": "~16.0.8",
     "expo-dev-client": "~6.0.20",
@@ -32,7 +37,6 @@
     "expo-notifications": "~0.32.16",
     "expo-speech": "~14.0.8",
     "expo-status-bar": "~3.0.9",
-    "express": "^5.2.1",
     "openai": "^6.33.0",
     "react": "19.1.0",
     "react-native": "0.81.5",
@@ -43,8 +47,11 @@
     "react-native-webrtc": "^124.0.7"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.4.10",
     "@config-plugins/react-native-webrtc": "^13.0.0",
     "@expo/ngrok": "^4.1.3",
+    "@types/node": "^25.5.2",
+    "bun-types": "^1.3.11",
     "cross-env": "^10.1.0",
     "eas-cli": "^18.4.0",
     "typescript": "~5.9.2"

@@ -1,81 +1,152 @@
 # Steady Path Inferred Technical Specifications
 
+This document describes the current implementation as it exists in the repo today. It is not a greenfield wishlist. It is the working specification that future changes should align with or explicitly update.
+
 Evidence labels used in this document:
 
-- `Observed`: directly implemented in the repo or explicitly declared in config/docs.
-- `Strong Inference`: not explicitly specified, but strongly implied by the implementation shape.
-- `Weak Inference`: plausible direction, but not yet strongly locked by code.
+- `Observed`: directly implemented in the repo or explicitly declared in config.
+- `Strong Inference`: strongly implied by the implementation shape and current runtime wiring.
+- `Weak Inference`: plausible direction, but not locked by the code.
+
+## Documentation and source-of-truth map
+
+- `Observed`: `AGENTS.md` is the repo operating guide for coding agents and should be read before substantial modifications.
+- `Observed`: `README.md` is the quick-start entry point for humans running the project locally.
+- `Observed`: `docs/README.md` is the runtime and platform note companion to this file.
+- `Observed`: `docs/content-filter-platform-plan.md` documents the Android DNS-filter implementation and the current iOS native gap.
 
 ## System topology
 
-- `Observed`: The product is a single React Native Expo application with one root component in `App.tsx`. The app shell, feature logic, persistence, navigation, charts, coach flows, and content-filter UX are all implemented from that file. Evidence: `index.ts:1-5`, `App.tsx:29-2205`.
-- `Observed`: The mobile app is backed by an optional local HTTP API implemented in `server/index.mjs`. Evidence: `server/index.mjs:9-199`.
-- `Observed`: Android includes a custom native module and a foreground VPN service for DNS filtering. Evidence: `android/app/src/main/java/com/steadypath/app/ContentFilterPackage.kt:8-13`, `android/app/src/main/java/com/steadypath/app/ContentFilterModule.kt:14-110`, `android/app/src/main/java/com/steadypath/app/ContentFilterVpnService.kt:21-199`.
-- `Observed`: iOS now has a generated Expo native project under `ios/`, but there is no iOS-native content-filter implementation. Evidence: `ios/Podfile:19-63`, `ios/SteadyPath/SteadyPath.entitlements`, `App.tsx:123-126`.
-- `Observed`: OpenAI is not called directly for the regular text coach path from the client. The client calls the local backend, and the backend calls OpenAI. Evidence: `App.tsx:2012-2038`, `server/index.mjs:21-89`.
-- `Observed`: Realtime voice is split into two hops: the client first asks the backend for a Realtime client secret, then the client negotiates SDP directly with OpenAI using `react-native-webrtc`. Evidence: `App.tsx:1154-1294`, `server/index.mjs:138-195`.
+- `Observed`: The product is a single Expo React Native application with a thin root export in `App.tsx` and modular source under `src/`.
+- `Observed`: The app bootstrap path is `App.tsx` -> `src/app/AppRoot.tsx` -> `src/app/AppSessionContext.tsx` -> onboarding navigator or main tab shell.
+- `Observed`: The main post-onboarding app shell is a six-tab navigator implemented in `src/navigation/AppTabs.tsx`.
+- `Observed`: The onboarding flow is a multi-screen native-stack flow implemented in `src/navigation/OnboardingNavigator.tsx`.
+- `Observed`: The backend is a Bun-native strict TypeScript HTTP API implemented under `server/src/`.
+- `Observed`: Android includes custom native code for content filtering via a DNS-filter VPN service. Evidence: `android/app/src/main/java/com/steadypath/app/ContentFilterModule.kt`, `ContentFilterPackage.kt`, `ContentFilterPrefs.kt`, `ContentFilterVpnService.kt`.
+- `Observed`: iOS includes a generated Expo native project under `ios/`, but there is no iOS-native content-filter implementation or Network Extension target.
+- `Observed`: The app and the backend are separately started processes. The app talks to the backend through an explicit environment-configured base URL rather than automatic Expo discovery.
+
+## Current code organization
+
+### Mobile application layout
+
+- `Observed`: `src/app/` owns bootstrap, session state, app-level orchestration, and app-level tests.
+- `Observed`: `src/navigation/` owns route param lists and the navigator trees.
+- `Observed`: `src/features/` owns feature-specific screens and services.
+- `Observed`: `src/domain/` owns shared data models and storage constants.
+- `Observed`: `src/theme/` owns shared styles and navigation theme configuration.
+- `Observed`: `src/ui/` owns reusable UI primitives.
+
+### Feature boundaries
+
+- `Observed`: `src/features/onboarding/screens.tsx` owns onboarding steps for goal setup, trigger time, risky apps, support, and review.
+- `Observed`: `src/features/today/screens.tsx` owns dashboard, urgency tools, daily plan, and progress snapshot screens.
+- `Observed`: `src/features/checkins/screens.tsx` owns new check-in and history flows.
+- `Observed`: `src/features/insights/screens.tsx` owns insights overview and charts.
+- `Observed`: `src/features/coach/screens.tsx` owns coach feature screens.
+- `Observed`: `src/features/coach/context.tsx` owns voice session state, realtime session setup, transcript flow, and teardown behavior.
+- `Observed`: `src/features/coach/service.ts` owns backend fetches and text fallback behavior.
+- `Observed`: `src/features/protection/screens.tsx` owns trigger-app and content-filter settings/status UI.
+- `Observed`: `src/features/reminders/reminderService.ts` owns local reminder scheduling.
+- `Observed`: `src/features/storage/repositories.ts` owns persistence adapters for local app data.
+
+### Server layout
+
+- `Observed`: `server/src/index.ts` is the server entrypoint.
+- `Observed`: `server/src/app/createServer.ts` is the composition root.
+- `Observed`: `server/src/routes/router.ts` owns path/method dispatch.
+- `Observed`: `server/src/handlers/` owns request/response mapping.
+- `Observed`: `server/src/services/` owns typed business logic.
+- `Observed`: `server/src/repositories/OpenAIRepository.ts` owns OpenAI SDK integration.
+- `Observed`: `server/src/repositories/AudioUploadRepository.ts` owns transcription input decoding.
+- `Observed`: `server/src/models/` owns DTOs and server-side types.
+- `Observed`: `server/src/lib/` owns shared HTTP helpers, limits, and errors.
 
 ## Runtime modes
 
 ### Expo Go mode
 
-- `Observed`: Expo Go can run the shared JavaScript UI when started with `expo start --go`. Evidence: `package.json:7`, Expo runtime conventions, and the absence of a custom JS entrypoint.
-- `Observed`: Expo Go is not the intended runtime for native-only features because the repo depends on `expo-dev-client` and `react-native-webrtc`. Evidence: `package.json:8`, `package.json:29`, `package.json:43`, `app.json:13-17`, `App.tsx:1179-1289`.
-- `Strong Inference`: Expo Go is suitable for checking navigation, storage-driven state, charts, and non-native UI flows, but it is not a valid end-to-end runtime for the full feature set.
+- `Observed`: Expo Go can render the shared JavaScript/TypeScript UI when started with `expo start --go`.
+- `Observed`: Expo Go is not the intended runtime for native-only features because the repo depends on `expo-dev-client` and `react-native-webrtc`.
+- `Strong Inference`: Expo Go is appropriate for navigation, styling, onboarding, check-ins, insights, profile flows, protection UI review, and text fallback checks, but not for the full native feature set.
 
 ### Development build mode
 
-- `Observed`: `package.json:8` defines `start:dev` as `expo start --dev-client`.
-- `Observed`: The generated Expo config declares `expo-dev-client` and `@config-plugins/react-native-webrtc`. Evidence: `app.json:13-17`.
-- `Observed`: Development builds are required to exercise native-only integrations such as `react-native-webrtc` and the Android content-filter module. Evidence: `App.tsx:123-126`, `App.tsx:1179-1289`.
+- `Observed`: `package.json` defines `start:dev` as `expo start --dev-client`.
+- `Observed`: The Expo config declares `expo-dev-client` and `@config-plugins/react-native-webrtc`.
+- `Observed`: Development builds are required to exercise `react-native-webrtc` and the Android content-filter native bridge.
 
 ### Local iOS native build mode
 
-- `Observed`: Expo prebuild generated a local iOS native project with autolinking and React Native pods. Evidence: `ios/Podfile:1-63`.
-- `Observed`: The generated iOS target currently exposes microphone and notification permissions plus local-networking allowance. Evidence: `app.json:23-30`, `ios/SteadyPath/Info.plist`.
-- `Strong Inference`: The current iOS target is technically capable of rendering the shared UI, running Expo modules, and participating in backend-driven coach flows, but not of performing the Android DNS-filter role.
+- `Observed`: Expo prebuild generated a local iOS native project with an Expo/RN Podfile and app target.
+- `Observed`: The generated iOS target exposes microphone permission text, notification permission text, and local networking allowance.
+- `Strong Inference`: The current iOS target is suitable for rendering the shared UI, local reminders, and backend-driven coach flows, but not for iOS-native content filtering.
 
 ## Functional modules
 
-### 1. Onboarding and plan state
+### 1. Onboarding and profile state
 
-- `Observed`: `OnboardingData` contains `primaryGoal`, `motivation`, `triggerTime`, `riskyApps`, `accountabilityContact`, and `reminderTime`. Evidence: `App.tsx:30-37`.
-- `Observed`: The app persists onboarding state locally and restores it on launch. Evidence: `App.tsx:218-245`.
-- `Observed`: The app uses local-only storage keys for onboarding, check-ins, reminders, and content-filter settings. Evidence: `App.tsx:112-116`.
-- `Strong Inference`: This is currently a single-user, device-local profile model with no server-side account concept.
+- `Observed`: `OnboardingData` includes `primaryGoal`, `motivation`, `triggerTime`, `riskyApps`, `accountabilityContact`, and `reminderTime`. Evidence: `src/domain/models.ts`.
+- `Observed`: The app persists onboarding/profile state locally and restores it on launch. Evidence: `src/app/AppSessionContext.tsx`, `src/app/services/appSessionService.ts`.
+- `Observed`: The app uses explicit storage keys defined in `src/domain/constants.ts` and implemented through repositories in `src/features/storage/repositories.ts`.
+- `Strong Inference`: The current product is single-user and device-local. There is no account or cloud identity layer.
 
-### 2. Check-ins and analytics
+### 2. Check-ins and local analytics
 
-- `Observed`: `CheckInEntry` contains `id`, `createdAt`, `mood`, `urgeLevel`, `trigger`, `outcome`, and `notes`. Evidence: `App.tsx:49-57`.
-- `Observed`: The app computes local analytics such as streaks, slip rate, mood distribution, and urge trends from device-stored check-ins. Evidence: `App.tsx:58-70`, `App.tsx:938-1050`, `App.tsx:1882-1985`.
-- `Strong Inference`: Analytics are derived entirely client-side from local data rather than aggregated remotely.
+- `Observed`: `CheckInEntry` contains `id`, `createdAt`, `mood`, `urgeLevel`, `trigger`, `outcome`, and `notes`.
+- `Observed`: Check-ins are persisted locally and restored into app session state.
+- `Observed`: Analytics such as streaks, slip rates, mood distribution, and urge trends are computed locally from device-stored check-ins. Evidence: `src/app/services/appHelpers.ts`, `src/features/insights/screens.tsx`.
+- `Strong Inference`: Analytics are entirely client-side today.
 
-### 3. Coach subsystem
+### 3. Reminders
 
-- `Observed`: The coach has text mode and voice mode inside the same feature area. Evidence: `App.tsx:1061-1108`, `App.tsx:1111-1294`.
-- `Observed`: The app will send a text coach request to the backend only if `EXPO_PUBLIC_COACH_API_URL` is configured. Evidence: `App.tsx:163`, `App.tsx:2012-2038`.
-- `Observed`: If the backend URL is missing or the request fails, the text coach falls back to deterministic local reply generation. Evidence: `App.tsx:2013-2037`.
-- `Observed`: Voice transcription has no equivalent local fallback; missing backend URL returns an empty transcription. Evidence: `App.tsx:2040-2068`.
-- `Observed`: Realtime voice depends on a backend-generated client secret and `react-native-webrtc` on-device transport. Evidence: `App.tsx:1154-1294`, `server/index.mjs:138-195`.
-- `Strong Inference`: The text coach is designed to degrade gracefully offline-ish, but the voice and realtime paths are not.
+- `Observed`: The app can schedule a daily reminder based on onboarding/profile reminder time. Evidence: `src/features/reminders/reminderService.ts`, `src/app/AppSessionContext.tsx`.
+- `Observed`: Reminder state is persisted locally, including the scheduled notification identifier. Evidence: `src/features/storage/repositories.ts`, `src/domain/constants.ts`.
+- `Strong Inference`: Reminder behavior is local-device only and not coordinated with any backend.
 
-### 4. Content-filter subsystem
+### 4. Coach subsystem
 
-- `Observed`: `ContentFilterConfig` contains `enabled`, `safeSearch`, `strictMode`, and `blockedCategories`. Evidence: `App.tsx:77-82`.
-- `Observed`: `ContentFilterStatus` includes runtime availability, VPN permission state, service status, category config, blocked request count, and last blocked domain. Evidence: `App.tsx:83-92`.
-- `Observed`: The JavaScript side defines a bridge contract with `updateConfig`, `getStatus`, `requestVpnPermissionAndStart`, `stopFiltering`, and `openVpnSettings`. Evidence: `App.tsx:99-109`.
-- `Observed`: The actual JS bridge is only created when `Platform.OS === 'android'`. Evidence: `App.tsx:123-126`.
-- `Observed`: When the bridge is missing, the app reports the feature as unavailable and keeps only the configuration UI active. Evidence: `App.tsx:358-389`.
-- `Observed`: The plan screen still renders content-filter settings on iOS and labels the platform state as entitlement-dependent. Evidence: `App.tsx:1462-1476`, `App.tsx:1513-1638`.
-- `Observed`: Android implements DNS-based whole-device filtering rather than per-app blocking. Evidence: `ContentFilterVpnService.kt:32-38`, `ContentFilterVpnService.kt:105-112`, `ContentFilterVpnService.kt:183-185`.
-- `Strong Inference`: The iOS content-filter UI currently acts as a shared config model and future placeholder, not an iOS-native enforcement feature.
+- `Observed`: The coach feature is separated into coach hub, text coach, and voice coach screens. Evidence: `src/navigation/AppTabs.tsx`, `src/features/coach/screens.tsx`.
+- `Observed`: Text coach uses a backend if `EXPO_PUBLIC_COACH_API_URL` is configured. Evidence: `src/features/coach/service.ts`.
+- `Observed`: If the backend URL is missing or the text request fails, the app falls back to deterministic local response generation. Evidence: `src/features/coach/service.ts`, `src/app/services/appHelpers.ts`.
+- `Observed`: Voice transcription depends on the backend and returns an empty string when no backend is configured or the request fails.
+- `Observed`: Realtime voice depends on a backend-generated client secret and client-side WebRTC negotiation from `src/features/coach/context.tsx`.
+- `Observed`: The backend uses the OpenAI SDK for text generation, transcription, and realtime client-secret creation. Evidence: `server/src/repositories/OpenAIRepository.ts`.
+- `Strong Inference`: Text coaching is designed to degrade gracefully, while transcription and realtime voice are not.
+
+### 5. Content-filter subsystem
+
+- `Observed`: `ContentFilterConfig` includes `enabled`, `safeSearch`, `strictMode`, and `blockedCategories`.
+- `Observed`: `ContentFilterStatus` includes runtime availability, permission/service state, blocked category config, blocked request count, and last blocked domain.
+- `Observed`: The JavaScript bridge contract is defined in `src/features/content-filter/service.ts` and includes config sync, status refresh, start, stop, and settings open behavior.
+- `Observed`: The native content-filter bridge is only created when `Platform.OS === 'android'`.
+- `Observed`: Non-Android platforms receive an unavailable/no-op implementation from the shared service layer.
+- `Observed`: Protection UI still renders shared settings on iOS even though native enforcement is not available.
+- `Observed`: Android implements DNS-filter VPN enforcement rather than an AccessibilityService app blocker or a Family Controls equivalent.
+- `Strong Inference`: On iOS, the content-filter UI is currently a shared config model and product placeholder, not a native enforcement feature.
+
+## Session, persistence, and state management
+
+- `Observed`: `src/app/AppSessionContext.tsx` is the canonical state owner for:
+  - onboarding/profile data
+  - onboarding completion flag
+  - check-in history
+  - reminder status
+  - content-filter config
+  - content-filter runtime status
+- `Observed`: `src/app/services/appSessionService.ts` centralizes orchestration logic for bootstrap, onboarding completion, reset, reminder enablement, content-filter updates, and content-filter refresh.
+- `Observed`: App state is loaded once during bootstrap and then refreshed selectively, including on app foreground transitions for content-filter status.
+- `Strong Inference`: The current architecture prefers a single app-session context plus feature modules rather than a separate state management library.
 
 ## Interface contracts
 
 ### Client environment contract
 
-- `Observed`: The client reads `EXPO_PUBLIC_COACH_API_URL` from `process.env`. Evidence: `App.tsx:163`.
-- `Observed`: If `EXPO_PUBLIC_COACH_API_URL` is unset, the text path uses local fallback, the transcription path returns empty output, and the realtime path stops before session creation. Evidence: `App.tsx:1155-1157`, `App.tsx:2013-2037`, `App.tsx:2041-2043`.
+- `Observed`: The client reads `EXPO_PUBLIC_COACH_API_URL` from `process.env` in `src/features/coach/service.ts`.
+- `Observed`: If `EXPO_PUBLIC_COACH_API_URL` is unset:
+  - text coach uses local fallback
+  - transcription returns an empty string
+  - realtime session creation returns `null`
 
 Expected value shape:
 
@@ -85,116 +156,101 @@ EXPO_PUBLIC_COACH_API_URL=http://<reachable-host>:8787
 
 ### Backend environment contract
 
-- `Observed`: The server reads `PORT` and `OPENAI_API_KEY`. Evidence: `server/index.mjs:10-11`.
-- `Observed`: If `OPENAI_API_KEY` is missing, all OpenAI-backed endpoints return 500-level configuration errors. Evidence: `server/index.mjs:22-27`, `server/index.mjs:92-97`, `server/index.mjs:139-144`.
+- `Observed`: The backend reads `PORT`, `OPENAI_API_KEY`, and `CORS_ALLOW_ORIGIN` in `server/src/config/env.ts`.
+- `Observed`: `PORT` defaults to `8787`.
+- `Observed`: `CORS_ALLOW_ORIGIN` defaults to `*`.
+- `Observed`: Missing `OPENAI_API_KEY` produces server-side configuration errors for OpenAI-backed endpoints.
 
 Expected value shape:
 
 ```env
 OPENAI_API_KEY=sk-...
 PORT=8787
+CORS_ALLOW_ORIGIN=*
 ```
 
 ### HTTP API contract
 
 `GET /health`
 
-- `Observed`: Returns `{ ok: true }`. Evidence: `server/index.mjs:17-19`.
+- `Observed`: Returns `{ ok: true }`. Evidence: `server/src/handlers/getHealthHandler.ts`.
 
 `POST /api/coach/text`
 
-- `Observed`: Request payload is JSON with `message` and `profile`. Evidence: `App.tsx:2018-2026`, `server/index.mjs:29-33`.
-- `Observed`: Response payload is `{ reply: string }`. Evidence: `server/index.mjs:80-82`.
-
-Request shape:
-
-```json
-{
-  "message": "I want to act out right now",
-  "profile": {
-    "primaryGoal": "Reduce porn use",
-    "motivation": "Sleep better",
-    "triggerTime": "Late night",
-    "riskyApps": "Chrome, Reddit",
-    "accountabilityContact": "Alex",
-    "reminderTime": "21:30"
-  }
-}
-```
+- `Observed`: Request payload contains `message` and `profile`. Evidence: `src/features/coach/service.ts`, `server/src/models/coach.ts`.
+- `Observed`: Response payload is `{ reply: string }`. Evidence: `server/src/handlers/postCoachTextHandler.ts`.
 
 `POST /api/coach/transcribe`
 
-- `Observed`: The client currently sends JSON with `audioBase64`. Evidence: `App.tsx:2045-2057`.
-- `Observed`: The server accepts either raw audio bytes or JSON `audioBase64`. Evidence: `server/index.mjs:13-15`, `server/index.mjs:99-105`.
-- `Strong Inference`: The intended API shape likely migrated from raw audio support toward JSON for convenience, but the server and client are not fully aligned on the optimal transport.
+- `Observed`: The client currently sends JSON with `audioBase64`.
+- `Observed`: The server accepts either raw `audio/*` bodies or JSON `{ audioBase64 }`.
+- `Observed`: Response payload is `{ text: string }`. Evidence: `server/src/handlers/postCoachTranscriptionHandler.ts`.
 
 `POST /api/coach/realtime/session`
 
-- `Observed`: The backend returns a payload containing `client_secret.value`. Evidence: `server/index.mjs:146-188`, `App.tsx:1171-1177`.
-- `Observed`: The client then sends the local SDP offer directly to `https://api.openai.com/v1/realtime?model=gpt-realtime`. Evidence: `App.tsx:1266-1289`.
-
-### Android native bridge contract
-
-Bridge surface inferred from `App.tsx:99-109` and implemented in `ContentFilterModule.kt:17-110`:
-
-```ts
-type NativeContentFilterModule = {
-  updateConfig(enabled, safeSearch, strictMode, blockedCategories): Promise<void>
-  getStatus(): Promise<ContentFilterStatus>
-  requestVpnPermissionAndStart(): Promise<string>
-  stopFiltering(): Promise<void>
-  openVpnSettings(): void
-}
-```
+- `Observed`: The response includes `client_secret.value`, `client_secret.expires_at`, and `session`. Evidence: `server/src/repositories/OpenAIRepository.ts`, `src/features/coach/context.tsx`.
+- `Observed`: The client uses the returned secret to negotiate WebRTC directly with OpenAI.
 
 ## Platform capability matrix
 
 ### Android
 
-- `Observed`: Supports the shared React Native UI, notifications, voice recording, backend coach calls, and a native DNS-filter VPN service. Evidence: `app.json:32-45`, `ContentFilterModule.kt:17-110`, `ContentFilterVpnService.kt:21-199`.
-- `Observed`: The native DNS filter is packaged into the app via `ContentFilterPackage` and registered in `MainApplication`. Evidence: `ContentFilterPackage.kt:8-13`, `MainApplication.kt:24-27`.
-- `Strong Inference`: Android is the only platform in this repo with an actual enforcement backend for the content-filter settings.
+- `Observed`: Supports the shared React Native UI, local reminders, backend coach calls, voice recording, realtime voice transport in dev builds, and a native DNS-filter VPN service.
+- `Observed`: The content-filter bridge is packaged through `ContentFilterPackage` and registered in `MainApplication`.
+- `Strong Inference`: Android is the only platform in this repo with real content-filter enforcement today.
 
 ### iOS
 
-- `Observed`: Supports the generated Expo/RN app shell, microphone permission text, notification permission text, local networking allowance, and the shared plan/coach UI. Evidence: `app.json:23-31`, `ios/SteadyPath/Info.plist`, `ios/Podfile:19-63`.
-- `Observed`: The generated entitlements file contains only `aps-environment`. There is no Network Extension entitlement and no separate extension target. Evidence: `ios/SteadyPath/SteadyPath.entitlements`.
-- `Observed`: The JavaScript layer marks the content-filter bridge unavailable on non-Android platforms. Evidence: `App.tsx:123-126`, `App.tsx:358-389`.
-- `Strong Inference`: iOS currently provides UI visibility plus backend-driven coach/reminder paths, but not native enforcement parity with Android.
+- `Observed`: Supports the generated Expo/RN app shell, shared UI, notifications, microphone permission text, local-network access allowance, and backend-driven coach flows.
+- `Observed`: The generated entitlements file does not include a Network Extension entitlement.
+- `Observed`: Shared protection UI is present, but native content-filter enforcement is not.
+- `Strong Inference`: iOS is currently a shared app shell plus coach/reminder client, not a native filter-enforcement platform.
 
 ### Web
 
-- `Observed`: `package.json:18` exposes `expo start --web`, but there is no web-specific specialization in the repo.
-- `Weak Inference`: Web support exists only at the Expo baseline level and is not a primary product target.
+- `Observed`: `package.json` exposes `expo start --web`.
+- `Weak Inference`: Web remains an Expo baseline convenience target and not a primary product platform.
 
 ## Build and tooling requirements
 
-- `Observed`: The repo is now Bun-oriented for dependency installation because `packageManager` is set to `bun@1.3.11`. Evidence: `package.json:52`.
-- `Observed`: The `api` script still executes Node directly rather than Bun runtime. Evidence: `package.json:6`.
-- `Observed`: Local iOS builds require full Xcode plus CocoaPods because the repo now contains an iOS Podfile and native target. Evidence: `ios/Podfile:1-63`.
-- `Observed`: The Podfile defaults the iOS deployment target to `15.1`. Evidence: `ios/Podfile:19`.
-- `Observed`: Hermes is enabled in the iOS Podfile properties. Evidence: `ios/Podfile.properties.json`.
+- `Observed`: The repo is Bun-oriented. `packageManager` is set to `bun@1.3.11`, and the backend scripts run through Bun.
+- `Observed`: CI uses Bun for install, lint, typecheck, and tests.
+- `Observed`: Linting is configured through Biome.
+- `Observed`: Local iOS native builds require full Xcode and CocoaPods.
+- `Observed`: The iOS Podfile currently targets iOS `15.1`.
+
+## Testing and verification
+
+- `Observed`: The repo includes app-level tests for app helpers and app-session orchestration.
+- `Observed`: The repo includes server tests for server creation and HTTP e2e startup.
+- `Observed`: CI verifies:
+  - `bun install --frozen-lockfile`
+  - `bun run lint`
+  - `bun run typecheck`
+  - `bun test`
+- `Strong Inference`: Changes to app services, server contracts, or runtime wiring are expected to maintain or extend automated coverage.
 
 ## Non-functional constraints inferred from the implementation
 
-- `Observed`: The app must tolerate backend absence for text coaching by falling back to local reply generation. Evidence: `App.tsx:2013-2037`.
-- `Observed`: The app currently assumes local network reachability or some other reachable URL for the backend; QR-based Expo discovery does not satisfy that requirement on its own. Evidence: `App.tsx:163`, `App.tsx:1154-1163`, `App.tsx:2018-2026`, `App.tsx:2050-2057`.
-- `Observed`: The transcription client currently expands audio into base64 JSON before upload. Evidence: `App.tsx:2045-2057`.
-- `Observed`: The server uses default `express.json()` plus a raw-body audio parser. Evidence: `server/index.mjs:13-15`.
-- `Strong Inference`: Larger voice uploads can fail at the JSON parser before the transcription handler is reached because the client does not use the raw-audio path.
-- `Strong Inference`: Privacy and security requirements are materially important because the stored and transmitted data includes behavioral-health-adjacent recovery content, urges, slips, and accountability-contact information.
+- `Observed`: The app must tolerate backend absence for text coaching by falling back to local reply generation.
+- `Observed`: The app assumes the backend is reachable through a real URL; Expo QR scanning does not satisfy backend reachability automatically.
+- `Observed`: The current transcription client uses base64 JSON, which is convenient but less efficient than raw audio upload.
+- `Observed`: The server explicitly enforces body-size limits and supports both JSON base64 and raw audio upload paths.
+- `Strong Inference`: Request-size pressure still exists for larger recordings because the client does not yet use the raw-audio upload path.
+- `Strong Inference`: Privacy and security matter materially because stored and transmitted data includes behavioral-health-adjacent notes, urges, slips, reminder preferences, and accountability-contact data.
 
 ## Explicitly unsupported or unimplemented today
 
-- `Observed`: There is no user authentication, account model, or cloud persistence.
-- `Observed`: There is no iOS-native content-filter bridge, Network Extension target, or entitlement-driven filter implementation.
-- `Observed`: There is no evidence of a current Android AccessibilityService-based app locker in the code, despite some older documentation language elsewhere in the repo.
-- `Observed`: There is no backend auth, rate limiting, or multitenant separation on the local coach API.
+- `Observed`: There is no user authentication, account model, or cloud sync.
+- `Observed`: There is no backend auth, tenancy model, or rate limiting.
+- `Observed`: There is no iOS-native content-filter bridge or Network Extension-based implementation.
+- `Observed`: There is no AccessibilityService-based Android app blocker in the current codebase.
+- `Observed`: There is no cloud persistence for onboarding, check-ins, or reminders.
 
-## Open questions for a clean-room rewrite
+## Open questions that remain architectural, not implementation facts
 
-- `Strong Inference`: Should the coach backend remain a thin local proxy, or should the product move toward a real application backend with auth and persistence?
-- `Strong Inference`: Is Android DNS filtering a core feature or an interim implementation on the way to a broader device-protection architecture?
-- `Strong Inference`: Should iOS remain a UI-plus-coach client, or is parity with Android content filtering a real product requirement?
-- `Strong Inference`: Should transcription continue using base64 JSON, or should the app move to the raw-audio path the server already accepts?
-- `Weak Inference`: Should the product scope remain a combination of coaching, tracking, and device-level filtering, or should one of those become the primary product surface?
+- `Strong Inference`: Should the coach backend remain a thin local proxy or become a real authenticated backend?
+- `Strong Inference`: Should transcription move from base64 JSON to raw audio upload for better efficiency and fewer body-size issues?
+- `Strong Inference`: Is Android DNS filtering the long-term protection strategy, or a transitional enforcement layer?
+- `Strong Inference`: Does iOS need native content-filter parity, or is it acceptable as a shared shell plus coach client?
+- `Weak Inference`: Should the product continue to balance recovery tracking, coaching, and device-level protection equally, or should one become the dominant product surface?

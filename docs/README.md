@@ -1,54 +1,131 @@
 # Platform and Runtime Notes
 
-This document describes the technical changes that were added to make the repo Bun-based and iOS-prebuild-capable, and it documents the current runtime limits with direct references to the implementation.
+This document is the technical runtime guide for the repo as it exists today. It explains the current Bun-based server, the modular `src/` app layout, the mobile/backend contract, the native platform boundaries, and the commit/run/test rules that matter during implementation work.
+
+## Documentation map
+
+Read the repo documents in this order:
+
+1. `AGENTS.md`
+   - Operating guide for coding agents.
+   - Explains repo layout, ownership, invariants, and verification expectations.
+2. `.specifications/specifications.md`
+   - Implementation-level specification derived from the codebase.
+   - Defines the current product surface, data contracts, and platform capability matrix.
+3. `docs/content-filter-platform-plan.md`
+   - Documents the Android DNS-filter path and the current iOS gap.
+4. `README.md`
+   - Quick-start entry point for humans running the app locally.
 
 ## Source of truth
 
-- `package.json:5-18` defines the run scripts.
-- `package.json:43-52` contains the relevant dependency changes: `react-native-webrtc`, `@config-plugins/react-native-webrtc`, and `packageManager: bun@1.3.11`.
-- `app.json:13-31` defines the Expo plugins and iOS app metadata that feed Expo prebuild.
-- `App.tsx:123-126` gates the native content-filter bridge to Android only.
-- `App.tsx:163` reads `EXPO_PUBLIC_COACH_API_URL`.
-- `App.tsx:1154-1294` implements the Realtime WebRTC path.
-- `App.tsx:2012-2068` implements the text and transcription HTTP calls.
-- `server/index.mjs:17-195` exposes the local coach API surface.
-- `ios/Podfile:19-63` is the generated iOS native target configuration produced by Expo prebuild.
-- `ios/SteadyPath/SteadyPath.entitlements` currently contains only `aps-environment`; there is no Network Extension entitlement in the generated iOS target.
+These files are the main implementation anchors:
 
-## Dependency and prebuild changes
+- `App.tsx`
+  - Thin root export. Future work should keep it thin.
+- `src/app/AppRoot.tsx`
+  - App bootstrap, loading gate, notification presentation behavior, and handoff to onboarding vs main tabs.
+- `src/app/AppSessionContext.tsx`
+  - Persisted session state, onboarding completion, reset flow, reminder status, content-filter config/status, and app bootstrap wiring.
+- `src/app/services/appSessionService.ts`
+  - App-level orchestration around repositories, reminders, and the content-filter bridge.
+- `src/navigation/AppTabs.tsx`
+  - Main six-tab app shell and per-feature stack ownership.
+- `src/navigation/OnboardingNavigator.tsx`
+  - Multi-screen onboarding flow.
+- `src/domain/models.ts`
+  - Shared TS models for onboarding, check-ins, reminders, content-filter state, and realtime payloads.
+- `src/domain/constants.ts`
+  - Stable AsyncStorage keys and defaults. Treat these as migration-sensitive.
+- `src/features/coach/service.ts`
+  - Client/backend HTTP contract and local fallback behavior.
+- `src/features/coach/context.tsx`
+  - Voice session lifecycle, realtime WebRTC negotiation, and teardown logic.
+- `src/features/content-filter/service.ts`
+  - Android bridge boundary and non-Android no-op behavior.
+- `server/src/index.ts`
+  - Bun server entrypoint.
+- `server/src/app/createServer.ts`
+  - Server composition root.
+- `server/src/routes/router.ts`
+  - Typed route dispatch and method handling.
+- `server/src/handlers/`
+  - HTTP request/response mapping.
+- `server/src/services/`
+  - Business logic for coach text, transcription, and realtime session creation.
+- `server/src/repositories/OpenAIRepository.ts`
+  - OpenAI SDK adapter. The server uses the SDK, not ad hoc REST calls.
+- `server/src/repositories/AudioUploadRepository.ts`
+  - Transcription upload parsing and size enforcement.
+- `.github/workflows/ci.yml`
+  - Required CI verification.
 
-The repo now declares Bun as the package manager:
+## Current repo layout
 
-```json
-{
-  "packageManager": "bun@1.3.11"
-}
-```
+### Mobile app
 
-Relevant dependency changes in `package.json`:
+- `src/app/`
+  - Bootstrap, persisted session provider, app-level services, and app-level tests.
+- `src/navigation/`
+  - Navigator definitions and route param types.
+- `src/features/onboarding/`
+  - Goal setup, trigger setup, risky-app setup, support setup, and onboarding review screens.
+- `src/features/today/`
+  - Dashboard, urgency tools, daily plan, and progress screens.
+- `src/features/checkins/`
+  - Check-in entry and history screens.
+- `src/features/insights/`
+  - Charts and analytics screens derived from device-local check-ins.
+- `src/features/coach/`
+  - Text coach, voice coach, realtime session handling, and backend calls.
+- `src/features/protection/`
+  - Trigger apps and content-filter settings/status screens.
+- `src/features/reminders/`
+  - Local reminder scheduling.
+- `src/features/storage/`
+  - Persistence repositories used by the app session layer.
+- `src/domain/`
+  - Shared models and storage constants.
+- `src/theme/`
+  - Navigation theme and shared app styles.
+- `src/ui/`
+  - Shared cards, screen containers, navigation affordances, and small UI primitives.
 
-```json
-{
-  "dependencies": {
-    "react-native-webrtc": "^124.0.7"
-  },
-  "devDependencies": {
-    "@config-plugins/react-native-webrtc": "^13.0.0"
-  }
-}
-```
+### Server
 
-Why the extra config plugin exists:
+- `server/src/index.ts`
+  - Loads env and starts the Bun server.
+- `server/src/config/`
+  - Parses `PORT`, `OPENAI_API_KEY`, and `CORS_ALLOW_ORIGIN`.
+- `server/src/app/`
+  - Server creation and network listener startup.
+- `server/src/routes/`
+  - Route registry and method/path dispatch.
+- `server/src/handlers/`
+  - HTTP request validation and response shaping.
+- `server/src/services/`
+  - Typed use-case logic.
+- `server/src/repositories/`
+  - OpenAI SDK access and audio upload decoding.
+- `server/src/models/`
+  - DTOs for coach, transcription, realtime, and HTTP helpers.
+- `server/src/lib/`
+  - Shared response helpers, request reading, limits, and error classes.
+- `server/src/test-utils/`
+  - Fake repositories for tests.
 
-- The app already imports `react-native-webrtc` dynamically in `App.tsx:1179`.
-- Expo prebuild needs the config plugin declared in `app.json:13-17` so the generated native iOS project is configured correctly.
-- Without that plugin, `expo prebuild` can generate an incomplete iOS native project for the WebRTC path.
+### Native platform code
 
-The generated iOS project was created from the current Expo config, not handwritten:
-
-```bash
-bunx expo prebuild --platform ios --no-install
-```
+- `android/app/src/main/java/com/steadypath/app/`
+  - `ContentFilterModule.kt`
+  - `ContentFilterPackage.kt`
+  - `ContentFilterPrefs.kt`
+  - `ContentFilterVpnService.kt`
+  - `MainApplication.kt`
+  - `MainActivity.kt`
+- `ios/`
+  - Generated Expo native iOS project.
+  - Commit-worthy project files live here, but local Pod outputs and Xcode user state should stay untracked.
 
 ## Command reference
 
@@ -59,7 +136,7 @@ cd /Users/macbook/Desktop/workspace/collabs/dev_app
 bun install
 ```
 
-Start the backend:
+Start the Bun backend:
 
 ```bash
 cd /Users/macbook/Desktop/workspace/collabs/dev_app
@@ -68,12 +145,14 @@ export PORT=8787
 bun run api
 ```
 
-Technical note:
+Watch the backend during server work:
 
-- `bun run api` does not run the server with the Bun runtime.
-- `package.json:6` still maps `api` to `node server/index.mjs`.
+```bash
+cd /Users/macbook/Desktop/workspace/collabs/dev_app
+bun run api:watch
+```
 
-Start Expo Go for shared UI checks:
+Start Expo Go for shared UI validation:
 
 ```bash
 cd /Users/macbook/Desktop/workspace/collabs/dev_app
@@ -81,7 +160,7 @@ export EXPO_PUBLIC_COACH_API_URL="http://<host-ip>:8787"
 bunx expo start --go --lan -c
 ```
 
-Start Expo dev-client mode:
+Start Expo dev-client mode for native-only paths:
 
 ```bash
 cd /Users/macbook/Desktop/workspace/collabs/dev_app
@@ -89,7 +168,7 @@ export EXPO_PUBLIC_COACH_API_URL="http://<host-ip>:8787"
 bun run start:dev
 ```
 
-Start a local iOS native build after CocoaPods is available:
+Run the local iOS native target after Pods are installed:
 
 ```bash
 cd /Users/macbook/Desktop/workspace/collabs/dev_app/ios
@@ -99,273 +178,249 @@ cd /Users/macbook/Desktop/workspace/collabs/dev_app
 bun run ios
 ```
 
-If Xcode is installed but Expo or `xcrun` still resolves to Command Line Tools, point the active developer directory at full Xcode:
+Run the local Android target:
 
 ```bash
-sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
-sudo xcodebuild -license accept
+cd /Users/macbook/Desktop/workspace/collabs/dev_app
+bun run android
 ```
 
-Install CocoaPods if it is missing:
+Run verification:
 
 ```bash
-brew install cocoapods
+cd /Users/macbook/Desktop/workspace/collabs/dev_app
+bun run lint
+bun run typecheck
+bun test
 ```
 
-## Runtime wiring
+## Client and server contracts
 
-The app/server boundary is not implicit. It is an explicit HTTP dependency.
+### App-side environment contract
 
-Environment variable read by the app:
+The app reads:
 
-```ts
-const coachApiUrl = process.env.EXPO_PUBLIC_COACH_API_URL?.replace(/\/$/, '')
+```env
+EXPO_PUBLIC_COACH_API_URL=http://<reachable-host>:8787
 ```
 
-Implementation reference: `App.tsx:163`.
+Implementation anchor: `src/features/coach/service.ts`
 
-The app talks to the backend in three places:
+Behavior:
 
-1. Text coach
+- Text coach calls `POST /api/coach/text` if the URL exists.
+- Voice transcription calls `POST /api/coach/transcribe` if the URL exists.
+- Realtime session bootstrap calls `POST /api/coach/realtime/session` if the URL exists.
+- If the URL is missing or the text request fails, text coach falls back to `generateCoachReply()` from `src/app/services/appHelpers.ts`.
+- If the URL is missing, transcription returns an empty string and realtime session creation returns `null`.
 
-```ts
-await fetch(`${coachApiUrl}/api/coach/text`, {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ message: input, profile: data }),
-})
+### Server-side environment contract
+
+The backend reads:
+
+```env
+OPENAI_API_KEY=sk-...
+PORT=8787
+CORS_ALLOW_ORIGIN=*
 ```
 
-Reference: `App.tsx:2012-2038`
+Implementation anchor: `server/src/config/env.ts`
 
-2. Voice transcription
+Behavior:
 
-```ts
-await fetch(`${coachApiUrl}/api/coach/transcribe`, {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ audioBase64: base64 }),
-})
-```
+- `PORT` defaults to `8787`.
+- `CORS_ALLOW_ORIGIN` defaults to `*`.
+- Missing `OPENAI_API_KEY` causes OpenAI-backed flows to return configuration errors.
 
-Reference: `App.tsx:2040-2068`
+### HTTP API surface
 
-3. Realtime session bootstrap
+`GET /health`
 
-```ts
-await fetch(`${coachApiUrl}/api/coach/realtime/session`, {
-  method: 'POST',
-})
-```
+- Response: `{ "ok": true }`
+- Handler: `server/src/handlers/getHealthHandler.ts`
 
-Reference: `App.tsx:1154-1177`
+`POST /api/coach/text`
 
-The backend exposes the matching endpoints here:
-
-- `GET /health` in `server/index.mjs:17-19`
-- `POST /api/coach/text` in `server/index.mjs:21-89`
-- `POST /api/coach/transcribe` in `server/index.mjs:91-136`
-- `POST /api/coach/realtime/session` in `server/index.mjs:138-195`
-
-Verify backend reachability before debugging the app:
-
-```bash
-curl http://<host-ip>:8787/health
-```
-
-Expected response:
+- Request:
 
 ```json
-{"ok":true}
+{
+  "message": "I want to watch porn right now",
+  "profile": {
+    "primaryGoal": "Reduce porn use",
+    "motivation": "Sleep better",
+    "triggerTime": "Late night",
+    "riskyApps": "Chrome, Reddit",
+    "accountabilityContact": "Alex",
+    "reminderTime": "21:30"
+  }
+}
 ```
+
+- Response:
+
+```json
+{
+  "reply": "..."
+}
+```
+
+`POST /api/coach/transcribe`
+
+- Current client request:
+
+```json
+{
+  "audioBase64": "<base64>"
+}
+```
+
+- Response:
+
+```json
+{
+  "text": "..."
+}
+```
+
+- Server also accepts raw `audio/*` bodies through `server/src/repositories/AudioUploadRepository.ts`.
+
+`POST /api/coach/realtime/session`
+
+- Response shape includes:
+
+```json
+{
+  "client_secret": {
+    "value": "...",
+    "expires_at": 1234567890
+  },
+  "session": {}
+}
+```
+
+- The client then uses that short-lived secret from `src/features/coach/context.tsx` to negotiate WebRTC with OpenAI.
 
 ## iOS support that now exists
 
-What was actually added:
+What is implemented:
 
-- `app.json:13-31` now describes a valid iOS app target with `bundleIdentifier`, `buildNumber`, microphone permission text, and notification permission text.
-- `ios/Podfile:19-63` defines a generated Expo/RN iOS target with Expo module autolinking.
-- `ios/SteadyPath/Info.plist` contains the generated iOS bundle metadata, local-networking allowance, microphone usage description, notification usage description, and URL schemes.
-- `ios/SteadyPath.xcodeproj/project.pbxproj` and `ios/SteadyPath.xcodeproj/xcshareddata/xcschemes/SteadyPath.xcscheme` are now commit-worthy project artifacts.
+- `app.json` declares the iOS bundle target, usage descriptions, and Expo plugin configuration.
+- `@config-plugins/react-native-webrtc` is configured so Expo prebuild can wire WebRTC correctly.
+- `ios/` contains a generated Expo/RN native project that can render the shared UI and participate in backend-driven coach flows.
+- `ios/SteadyPath/Info.plist` contains microphone, notification, and local-networking permissions used by the current app shell.
 
-What this means in practice:
+What that means:
 
-- The repo can now be opened in Xcode as a generated native iOS project.
-- The shared React Native UI can be rendered on iOS.
-- iOS builds can request microphone and notification permissions because the generated plist contains those usage descriptions.
-- The generated iOS app allows local HTTP access on the local network because `ios/SteadyPath/Info.plist` includes `NSAllowsLocalNetworking = true`.
+- The shared React Native UI can run on iOS.
+- Development builds can use iOS native modules included by Expo prebuild and installed Pods.
+- The repo can be opened in Xcode and run as a generated native app.
 
 ## Current technical limitations
 
 ### 1. The content-filter implementation is Android-only
 
-This is not just a product statement. It is visible in the implementation.
+This is enforced in code, not just in documentation.
 
-The React Native bridge is only bound on Android:
-
-```ts
-const nativeContentFilter =
-  Platform.OS === 'android'
-    ? (NativeModules.ContentFilterModule as NativeContentFilterModule | undefined)
-    : undefined
-```
-
-Reference: `App.tsx:123-126`
-
-The state model also defaults the feature to unavailable off Android:
-
-```ts
-available: Platform.OS === 'android',
-platformLabel: Platform.OS === 'android'
-  ? 'Android DNS content filter'
-  : 'iOS content filter path'
-```
-
-Reference: `App.tsx:190-199`
-
-The plan screen explicitly exposes Android-only actions:
-
-- Start Android filter
-- Stop Android filter
-- Open VPN settings
-
-References:
-
-- `App.tsx:1462-1476`
-- `App.tsx:1597-1638`
-
-The Android implementation is concrete and already wired:
-
-- `android/app/src/main/java/com/steadypath/app/ContentFilterPackage.kt:8-13`
-- `android/app/src/main/java/com/steadypath/app/MainApplication.kt:24-27`
-- `android/app/src/main/java/com/steadypath/app/ContentFilterModule.kt:17-110`
-- `android/app/src/main/java/com/steadypath/app/ContentFilterVpnService.kt:21-199`
-
-Technically, the Android path is a DNS-filter VPN service, not a per-app blocker:
-
-- `ContentFilterModule.kt:71-86` requests VPN permission and starts the service.
-- `ContentFilterVpnService.kt:32-38` creates a VPN interface and routes DNS through it.
-- `ContentFilterVpnService.kt:105-112` blocks or forwards DNS queries based on category and strictness settings.
-
-On iOS there is no equivalent bridge, no Network Extension target, and no entitlement for packet filtering. The generated entitlements file currently contains only:
-
-```xml
-<key>aps-environment</key>
-<string>development</string>
-```
-
-That means the current iOS target is a UI/client shell, not an iOS content-filter implementation.
+- `src/features/content-filter/service.ts` only binds the native module on Android.
+- `src/features/protection/screens.tsx` still renders shared settings UI on iOS, but runtime actions remain platform dependent.
+- Android native implementation lives in:
+  - `android/app/src/main/java/com/steadypath/app/ContentFilterModule.kt`
+  - `android/app/src/main/java/com/steadypath/app/ContentFilterPackage.kt`
+  - `android/app/src/main/java/com/steadypath/app/ContentFilterPrefs.kt`
+  - `android/app/src/main/java/com/steadypath/app/ContentFilterVpnService.kt`
+- The current Android implementation is DNS-filter VPN enforcement, not a per-app blocker and not an AccessibilityService flow.
+- The generated iOS app does not have a Network Extension target or corresponding entitlements.
 
 ### 2. Expo Go is not feature-complete for this repo
 
-The repo contains native-only functionality:
+The repo includes native-only functionality:
 
-- `react-native-webrtc` is used in `App.tsx:1179-1289`
-- `expo-dev-client` is configured in `app.json:13-17`
-- `package.json:8` starts Expo with `--dev-client`
+- `react-native-webrtc`
+- `expo-dev-client`
+- the Android content-filter bridge
 
-That means:
+Use Expo Go for:
 
-- Expo Go is acceptable for checking shared JS/TS UI flows.
-- Expo Go is not the target runtime for the full app.
-- Realtime voice and any custom native module path should be tested in a development build.
+- navigation checks
+- styling/layout validation
+- onboarding/check-in/profile/protection UI review
+- local text-coach fallback review
 
-If the goal is only to see layout and shared logic on a phone, use:
+Use a development build for:
 
-```bash
-bunx expo start --go --lan
-```
-
-If the goal is to exercise native-only paths, use:
-
-```bash
-bun run start:dev
-```
-
-and install a matching development build first.
+- realtime voice
+- native Android content-filter controls
+- full native behavior testing
 
 ### 3. Expo QR scanning does not expose the backend automatically
 
-Expo serves the bundle. The backend is a separate Express process.
+The QR code only points the device at the Metro bundle. The backend is a separate Bun process, and the client always uses `EXPO_PUBLIC_COACH_API_URL`.
 
-The app never discovers the backend from the QR code. It always uses `EXPO_PUBLIC_COACH_API_URL`, read from `App.tsx:163`, and then performs absolute `fetch()` calls to that URL.
+That means mobile testing still needs a reachable backend URL such as:
 
-That is why the following pattern is required:
-
-```bash
-export OPENAI_API_KEY="sk-..."
-export PORT=8787
-bun run api
+```env
+EXPO_PUBLIC_COACH_API_URL=http://172.20.10.9:8787
 ```
-
-```bash
-export EXPO_PUBLIC_COACH_API_URL="http://<host-ip>:8787"
-bunx expo start --go --lan
-```
-
-If `EXPO_PUBLIC_COACH_API_URL` is missing:
-
-- text coach falls back to local deterministic replies in `App.tsx:2013-2037`
-- transcription returns an empty string in `App.tsx:2041-2067`
-- realtime voice reports `Backend URL not configured` in `App.tsx:1155-1157`
 
 ### 4. Local iOS builds still depend on Xcode health and CocoaPods
 
-The repo now contains an iOS project, but that does not remove the machine-level prerequisites.
-
-Required local tooling:
+The repo contains the iOS project, but local machine setup is still required:
 
 ```bash
 sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+sudo xcodebuild -license accept
 brew install cocoapods
 cd ios && pod install
 ```
 
-Implementation references:
+### 5. The transcription path still uses base64 JSON on the client
 
-- `ios/Podfile:19` sets the iOS deployment target to `15.1` unless overridden in Podfile properties.
-- `ios/Podfile:23-63` uses Expo module autolinking and React Native pod integration.
-- `ios/Podfile.properties.json` enables Hermes and Expo dev-client network inspector.
+Current state:
 
-### 5. The transcription path has a known request-size constraint
+- The app sends base64 JSON from `src/features/coach/service.ts`.
+- The server accepts both base64 JSON and raw `audio/*`.
+- Larger recordings can still be constrained by JSON body size before the raw-audio path is used.
 
-The client currently sends transcription audio as base64 JSON:
+## CI and verification
 
-```ts
-body: JSON.stringify({ audioBase64: base64 })
-```
+GitHub Actions runs the required checks on every push and pull request:
 
-Reference: `App.tsx:2045-2057`
+- `bun install --frozen-lockfile`
+- `bun run lint`
+- `bun run typecheck`
+- `bun test`
 
-The server currently uses:
-
-```ts
-app.use(express.json())
-app.use(express.raw({ type: 'audio/*', limit: '25mb' }))
-```
-
-Reference: `server/index.mjs:13-15`
-
-This means the raw-audio path is available on the server, but the app is not using it. Larger recordings can fail at the JSON parser before the transcription handler gets useful input.
+Implementation anchor: `.github/workflows/ci.yml`
 
 ## Commit boundary
 
-Files meant to stay in git:
+Commit these:
 
+- `src/`
+- `server/src/`
+- `android/` native source changes when intentional
+- generated `ios/` project files that define the shared native target
 - `.specifications/`
+- `docs/`
+- `AGENTS.md`
 - `bun.lock`
-- `app.json`
 - `package.json`
-- the generated iOS project files under `ios/`
-- this document
+- `app.json`
+- CI/workflow files
 
-Files intentionally kept out of git:
+Do not commit these:
 
-- `maintainers-review/`
-- `node_modules/`
+- `.env`
+- `.env.local`
+- `.env.*` except `.env.example`
+- `.envrc`
+- `.direnv/`
 - `.expo/`
+- `node_modules/`
 - `ios/Pods/`
 - `ios/build/`
 - `xcuserdata`
 - `.xcode.env.local`
 - `.xcresult`
+- `maintainers-review/`
