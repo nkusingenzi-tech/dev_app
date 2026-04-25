@@ -40,6 +40,8 @@ export function applyFieldValue(current: Answers, field: AnswerField, value: str
   };
 }
 
+
+//TODO: the return value should be selected symptoms not next
 export function toggleSymptomValue(current: Answers, symptom: string): Answers {
   const nextSymptoms = current.symptoms.includes(symptom)
     ? current.symptoms.filter((item) => item !== symptom)
