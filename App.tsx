@@ -1,10 +1,7 @@
 import React from 'react';
 
-import { OnboardingView } from './src/OnboardingComponents';
-import { useOnboarding } from './src/useOnboarding';
+import { FreemanApp } from './src/FreemanApp';
 
 export default function App() {
-  const controller = useOnboarding();
-
-  return <OnboardingView controller={controller} />;
+  return <FreemanApp />;
 }
