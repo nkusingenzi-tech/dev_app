@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "Freeman",
-    "slug": "freeman-onboarding",
+    "slug": "freeman-mvp",
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
@@ -9,10 +9,10 @@
       "**/*"
     ],
     "android": {
-      "package": "com.freeman.onboarding"
+      "package": "com.freeman.mvp"
     },
     "ios": {
-      "bundleIdentifier": "com.freeman.onboarding"
+      "bundleIdentifier": "com.freeman.mvp"
     }
   }
 }

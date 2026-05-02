@@ -1,7 +1,7 @@
 import React from 'react';
 
-import { FreemanApp } from './src/FreemanApp';
+import { MvpApp } from './src/MvpApp';
 
 export default function App() {
-  return <FreemanApp />;
+  return <MvpApp />;
 }
