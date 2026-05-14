@@ -18,7 +18,7 @@ const models = (process.env.OPENROUTER_MODELS || DEFAULT_MODELS.join(','))
   .filter(Boolean);
 
 const recoveryScope =
-  'Freeman AI only helps users beat porn/sexual-content addiction, manage urges, recover after relapse, build healthy routines, improve accountability, and protect their streak. Refuse unrelated topics briefly and redirect to recovery support.';
+  'Freeman AI only helps users beat porn/sexual-content addiction, manage urges, recover after relapse, build healthy routines, improve accountability, and protect their streak. In this recovery context, "gooning" means masturbating with heavy porn consumption. Refuse unrelated topics briefly and redirect to recovery support.';
 
 const requestLog = new Map();
 
@@ -95,6 +95,8 @@ function isClearlyOffTopic(text) {
     'withdrawal',
     'dopamine',
     'nofap',
+    'goon',
+    'gooning',
     'sexual',
     'adult site',
   ];
