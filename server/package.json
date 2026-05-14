@@ -1,0 +1,14 @@
+{
+  "name": "freeman-ai-proxy",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Freeman AI OpenRouter proxy",
+  "main": "openrouter-proxy.js",
+  "scripts": {
+    "start": "node openrouter-proxy.js",
+    "check": "node --check openrouter-proxy.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

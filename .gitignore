@@ -7,6 +7,10 @@ yarn-error.log*
 expo.log
 expo-error.log
 expo-launch.log
+.env
+server/.env
 adb-current-screen.png
 freeman-expo-qr.png
 freeman-current.png
+screen-ai-debug.png
+freeman_ai_debug*.png
