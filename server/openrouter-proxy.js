@@ -18,11 +18,21 @@ const MAX_BODY_BYTES = 64 * 1024;
 const MAX_MESSAGES = 10;
 const MAX_MESSAGE_CHARS = 2000;
 const RETRYABLE_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504]);
+const DISABLED_MODELS = new Set([
+  'inclusionai/ring-2.6-1t:free',
+]);
 
-const models = (process.env.OPENROUTER_MODELS || DEFAULT_MODELS.join(','))
-  .split(',')
-  .map((model) => model.trim())
-  .filter(Boolean);
+function resolveModels() {
+  const configuredModels = (process.env.OPENROUTER_MODELS || DEFAULT_MODELS.join(','))
+    .split(',')
+    .map((model) => model.trim())
+    .filter(Boolean)
+    .filter((model) => !DISABLED_MODELS.has(model));
+
+  return configuredModels.length ? configuredModels : DEFAULT_MODELS;
+}
+
+const models = resolveModels();
 
 const recoveryScope =
   'Freeman AI only helps users beat porn/sexual-content addiction, manage urges, recover after relapse, build healthy routines, improve accountability, and protect their streak. In this recovery context, "gooning" means masturbating with heavy porn consumption. Refuse unrelated topics briefly and redirect to recovery support.';
