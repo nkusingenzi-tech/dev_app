@@ -4,13 +4,20 @@ const PORT = Number(process.env.PORT || 8787);
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const DEFAULT_MODELS = [
-  'inclusionai/ring-2.6-1t:free',
   'deepseek/deepseek-v4-flash:free',
   'google/gemma-4-26b-a4b-it:free',
   'openai/gpt-oss-20b:free',
-  'meta-llama/llama-3.2-3b-instruct:free',
+  'minimax/minimax-m2.5:free',
+  'nvidia/nemotron-3-nano-30b-a3b:free',
+  'openrouter/free',
 ];
-const MODEL_TIMEOUT_MS = Number(process.env.MODEL_TIMEOUT_MS || 12000);
+const MODEL_TIMEOUT_MS = Number(process.env.MODEL_TIMEOUT_MS || 9000);
+const AI_OVERALL_TIMEOUT_MS = Number(process.env.AI_OVERALL_TIMEOUT_MS || 28000);
+const MAX_REQUESTS_PER_MIN = Number(process.env.MAX_REQUESTS_PER_MIN || 20);
+const MAX_BODY_BYTES = 64 * 1024;
+const MAX_MESSAGES = 10;
+const MAX_MESSAGE_CHARS = 2000;
+const RETRYABLE_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504]);
 
 const models = (process.env.OPENROUTER_MODELS || DEFAULT_MODELS.join(','))
   .split(',')
@@ -22,14 +29,16 @@ const recoveryScope =
 
 const requestLog = new Map();
 
-function sendJson(res, status, body) {
+function sendJson(res, status, body, requestId) {
   res.writeHead(status, {
     'Content-Type': 'application/json',
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'Content-Type',
     'Access-Control-Allow-Methods': 'POST, OPTIONS, GET',
+    'Cache-Control': 'no-store',
+    ...(requestId ? { 'X-Request-Id': requestId } : {}),
   });
-  res.end(JSON.stringify(body));
+  res.end(JSON.stringify({ ...body, requestId }));
 }
 
 function readBody(req) {
@@ -37,7 +46,7 @@ function readBody(req) {
     let body = '';
     req.on('data', (chunk) => {
       body += chunk;
-      if (body.length > 64 * 1024) {
+      if (Buffer.byteLength(body) > MAX_BODY_BYTES) {
         reject(new Error('Request body is too large'));
         req.destroy();
       }
@@ -50,21 +59,32 @@ function readBody(req) {
 function isRateLimited(ip) {
   const now = Date.now();
   const windowMs = 60 * 1000;
-  const maxRequests = 20;
   const recent = (requestLog.get(ip) || []).filter((time) => now - time < windowMs);
   recent.push(now);
   requestLog.set(ip, recent);
-  return recent.length > maxRequests;
+  return recent.length > MAX_REQUESTS_PER_MIN;
+}
+
+function getClientIp(req) {
+  const forwarded = req.headers['x-forwarded-for'];
+  if (typeof forwarded === 'string' && forwarded.trim()) {
+    return forwarded.split(',')[0].trim();
+  }
+  return req.socket.remoteAddress || 'unknown';
+}
+
+function makeRequestId() {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 function sanitizeMessages(rawMessages) {
   if (!Array.isArray(rawMessages)) return [];
 
   return rawMessages
-    .slice(-10)
+    .slice(-MAX_MESSAGES)
     .map((message) => ({
       role: message?.role === 'assistant' ? 'assistant' : 'user',
-      content: String(message?.content || '').slice(0, 2000),
+      content: String(message?.content || '').slice(0, MAX_MESSAGE_CHARS),
     }))
     .filter((message) => message.content.trim().length > 0);
 }
@@ -128,31 +148,70 @@ function offTopicReply() {
   return 'I can only help with recovery from porn or sexual-content addiction. Tell me what you are feeling right now: an urge, a trigger, a relapse, boredom, stress, or a routine problem.';
 }
 
+function providerFallbackReply(text) {
+  const normalized = text.toLowerCase();
+
+  if (normalized.includes('relapse') || normalized.includes('relapsed')) {
+    return 'The AI provider is slow right now, but your next step is simple: log the relapse honestly, leave the trigger environment, drink water, and write one sentence about what started it. Do not turn this into a binge.';
+  }
+
+  if (normalized.includes('urge') || normalized.includes('goon') || normalized.includes('porn') || normalized.includes('trigger')) {
+    return 'The AI provider is slow right now, so use the emergency plan: put the phone away, stand up, leave the room, breathe slowly for one minute, and wait ten minutes before making any decision.';
+  }
+
+  return 'The AI provider is slow right now. Keep this recovery-focused: name the feeling, remove the easiest trigger, and take one small action that protects your streak for the next ten minutes.';
+}
+
+function isRetryableError(error) {
+  const message = String(error.message || '').toLowerCase();
+  const modelUnavailable =
+    message.includes('no longer available') ||
+    message.includes('not a valid model') ||
+    message.includes('model unavailable') ||
+    message.includes('has transitioned to a paid model');
+
+  if (modelUnavailable) return true;
+  if (!error.status) return true;
+  return RETRYABLE_STATUSES.has(error.status);
+}
+
 async function callOpenRouter({ model, messages, username }) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), MODEL_TIMEOUT_MS);
 
-  const response = await fetch(OPENROUTER_URL, {
-    method: 'POST',
-    signal: controller.signal,
-    headers: {
-      Authorization: `Bearer ${OPENROUTER_API_KEY}`,
-      'Content-Type': 'application/json',
-      'HTTP-Referer': 'https://freeman.local',
-      'X-Title': 'Freeman',
-    },
-    body: JSON.stringify({
-      model,
-      messages: [
-        {
-          role: 'system',
-          content:
-            `You are Freeman AI, a calm recovery assistant for ${username}. ${recoveryScope} Keep replies short, practical, and direct. Do not answer general knowledge, coding, school, entertainment, politics, finance, or unrelated requests. For unrelated requests, say you can only help with recovery and ask what recovery challenge they are facing. Do not be judgmental. If the user seems in immediate danger, tell them to contact local emergency support.`,
-        },
-        ...messages,
-      ],
-    }),
-  }).finally(() => clearTimeout(timeout));
+  let response;
+  try {
+    response = await fetch(OPENROUTER_URL, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://freeman.local',
+        'X-Title': 'Freeman',
+      },
+      body: JSON.stringify({
+        model,
+        temperature: 0.45,
+        max_tokens: 320,
+        messages: [
+          {
+            role: 'system',
+            content:
+              `You are Freeman AI, a calm recovery assistant for ${username}. ${recoveryScope} Keep replies short, practical, and direct. Give concrete next actions. Do not answer general knowledge, coding, school, entertainment, politics, finance, or unrelated requests. For unrelated requests, say you can only help with recovery and ask what recovery challenge they are facing. Do not be judgmental. If the user seems in immediate danger, tell them to contact local emergency support.`,
+          },
+          ...messages,
+        ],
+      }),
+    });
+  } catch (error) {
+    const nextError = new Error(error?.name === 'AbortError' ? 'OpenRouter request timed out' : error.message || 'OpenRouter network error');
+    nextError.status = undefined;
+    nextError.model = model;
+    throw nextError;
+  } finally {
+    clearTimeout(timeout);
+  }
 
   const text = await response.text();
   let data;
@@ -181,14 +240,15 @@ async function callOpenRouter({ model, messages, username }) {
 }
 
 async function handleChat(req, res) {
+  const requestId = makeRequestId();
   if (!OPENROUTER_API_KEY) {
-    sendJson(res, 500, { error: 'OPENROUTER_API_KEY is not set on the proxy server' });
+    sendJson(res, 503, { error: 'OPENROUTER_API_KEY is not set on the backend', code: 'AI_NOT_CONFIGURED' }, requestId);
     return;
   }
 
-  const ip = req.socket.remoteAddress || 'unknown';
+  const ip = getClientIp(req);
   if (isRateLimited(ip)) {
-    sendJson(res, 429, { error: 'Proxy rate limit reached. Wait a minute and try again.' });
+    sendJson(res, 429, { error: 'Proxy rate limit reached. Wait a minute and try again.', code: 'RATE_LIMITED' }, requestId);
     return;
   }
 
@@ -196,7 +256,7 @@ async function handleChat(req, res) {
   try {
     payload = JSON.parse(await readBody(req));
   } catch {
-    sendJson(res, 400, { error: 'Invalid JSON body' });
+    sendJson(res, 400, { error: 'Invalid JSON body', code: 'BAD_JSON' }, requestId);
     return;
   }
 
@@ -204,29 +264,39 @@ async function handleChat(req, res) {
   const messages = sanitizeMessages(payload.messages);
 
   if (!messages.length) {
-    sendJson(res, 400, { error: 'No chat messages provided' });
+    sendJson(res, 400, { error: 'No chat messages provided', code: 'NO_MESSAGES' }, requestId);
     return;
   }
 
   const lastUserMessage = [...messages].reverse().find((message) => message.role === 'user');
   if (lastUserMessage && isClearlyOffTopic(lastUserMessage.content)) {
-    sendJson(res, 200, { reply: offTopicReply(), model: 'scope-guard' });
+    sendJson(res, 200, { reply: offTopicReply(), model: 'scope-guard' }, requestId);
     return;
   }
 
   const errors = [];
+  const deadline = Date.now() + AI_OVERALL_TIMEOUT_MS;
   for (const model of models) {
+    if (Date.now() >= deadline) break;
+
     try {
       const reply = await callOpenRouter({ model, messages, username });
-      sendJson(res, 200, { reply, model });
+      sendJson(res, 200, { reply, model }, requestId);
       return;
     } catch (error) {
       errors.push(`${error.model || model}: ${error.message}`);
-      if (![429, 502, 503, 504].includes(error.status)) break;
+      console.warn(`[${requestId}] ${error.model || model} failed: ${error.message}`);
+      if (!isRetryableError(error)) break;
     }
   }
 
-  sendJson(res, 502, { error: `All AI models failed. ${errors.join(' | ')}` });
+  const fallbackText = providerFallbackReply(lastUserMessage?.content || '');
+  sendJson(res, 200, {
+    reply: fallbackText,
+    model: 'provider-fallback',
+    degraded: true,
+    providerErrors: errors.slice(-3),
+  }, requestId);
 }
 
 const server = http.createServer((req, res) => {
@@ -235,19 +305,26 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  if (req.method === 'GET' && req.url === '/health') {
-    sendJson(res, 200, { ok: true, models });
+  if (req.method === 'GET' && (req.url === '/' || req.url === '/health')) {
+    sendJson(res, 200, {
+      ok: true,
+      service: 'freeman-ai-backend',
+      configured: Boolean(OPENROUTER_API_KEY),
+      models,
+      modelTimeoutMs: MODEL_TIMEOUT_MS,
+      overallTimeoutMs: AI_OVERALL_TIMEOUT_MS,
+    });
     return;
   }
 
   if (req.method === 'POST' && req.url === '/api/chat') {
     handleChat(req, res).catch((error) => {
-      sendJson(res, 500, { error: error.message || 'Unexpected proxy error' });
+      sendJson(res, 500, { error: error.message || 'Unexpected backend error', code: 'UNEXPECTED_ERROR' });
     });
     return;
   }
 
-  sendJson(res, 404, { error: 'Not found' });
+  sendJson(res, 404, { error: 'Not found', code: 'NOT_FOUND' });
 });
 
 server.listen(PORT, '0.0.0.0', () => {

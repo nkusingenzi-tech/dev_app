@@ -11,6 +11,10 @@ services:
       - key: OPENROUTER_API_KEY
         sync: false
       - key: MODEL_TIMEOUT_MS
-        value: "12000"
+        value: "9000"
+      - key: AI_OVERALL_TIMEOUT_MS
+        value: "28000"
+      - key: MAX_REQUESTS_PER_MIN
+        value: "20"
       - key: OPENROUTER_MODELS
-        value: "inclusionai/ring-2.6-1t:free,deepseek/deepseek-v4-flash:free,google/gemma-4-26b-a4b-it:free,openai/gpt-oss-20b:free,meta-llama/llama-3.2-3b-instruct:free"
+        value: "deepseek/deepseek-v4-flash:free,google/gemma-4-26b-a4b-it:free,openai/gpt-oss-20b:free,minimax/minimax-m2.5:free,nvidia/nemotron-3-nano-30b-a3b:free,openrouter/free"
