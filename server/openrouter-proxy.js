@@ -51,6 +51,172 @@ function sendJson(res, status, body, requestId) {
   res.end(JSON.stringify({ ...body, requestId }));
 }
 
+function sendHtml(res, status, html) {
+  res.writeHead(status, {
+    'Content-Type': 'text/html; charset=utf-8',
+    'Cache-Control': 'no-store',
+  });
+  res.end(html);
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function extensionSetupPage(code) {
+  const safeCode = escapeHtml(code || '');
+  const chromeUrl = process.env.CHROME_EXTENSION_URL || '';
+  const edgeUrl = process.env.EDGE_EXTENSION_URL || '';
+  const firefoxUrl = process.env.FIREFOX_EXTENSION_URL || '';
+
+  function storeLink(label, url) {
+    if (!url) {
+      return `<div class="store disabled"><strong>${label}</strong><span>Store link coming soon</span></div>`;
+    }
+    return `<a class="store" href="${escapeHtml(url)}" target="_blank" rel="noreferrer"><strong>${label}</strong><span>Install extension</span></a>`;
+  }
+
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Freeman Browser Setup</title>
+    <style>
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: #07090f;
+        color: #f8fafc;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 28px 16px;
+      }
+      main {
+        width: min(520px, 100%);
+        border: 1px solid #1c2536;
+        border-radius: 28px;
+        background: linear-gradient(155deg, #0f1523, #090d16);
+        padding: 28px;
+        box-shadow: 0 24px 80px rgba(0,0,0,.45);
+      }
+      .eyebrow {
+        color: #3d8f6b;
+        font-size: 12px;
+        font-weight: 900;
+        letter-spacing: 1.6px;
+        text-transform: uppercase;
+      }
+      h1 {
+        margin: 10px 0 10px;
+        font-size: 34px;
+        line-height: 1.05;
+      }
+      p {
+        margin: 0;
+        color: #94a3b8;
+        font-size: 15px;
+        line-height: 1.6;
+      }
+      .code {
+        margin: 22px 0;
+        border: 1px solid #274132;
+        background: #0a1410;
+        border-radius: 18px;
+        padding: 16px;
+      }
+      .code span {
+        display: block;
+        color: #94a3b8;
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        margin-bottom: 8px;
+      }
+      .code strong {
+        display: block;
+        color: #5bb98b;
+        font-size: 30px;
+        letter-spacing: 2px;
+      }
+      .stores {
+        display: grid;
+        gap: 10px;
+        margin: 20px 0;
+      }
+      .store {
+        display: flex;
+        justify-content: space-between;
+        gap: 14px;
+        text-decoration: none;
+        color: #f8fafc;
+        border: 1px solid #1f2937;
+        border-radius: 16px;
+        padding: 14px 16px;
+        background: #101827;
+      }
+      .store span { color: #5bb98b; font-weight: 800; }
+      .store.disabled { opacity: .62; }
+      .steps {
+        margin-top: 18px;
+        padding-left: 20px;
+        color: #cbd5e1;
+        line-height: 1.7;
+      }
+      .note {
+        margin-top: 18px;
+        color: #64748b;
+        font-size: 13px;
+      }
+      button {
+        width: 100%;
+        border: 0;
+        border-radius: 16px;
+        padding: 14px 16px;
+        background: #3d8f6b;
+        color: #07100c;
+        font-size: 15px;
+        font-weight: 900;
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="eyebrow">Freeman browser protection</div>
+      <h1>Connect your computer blocker</h1>
+      <p>Install Freeman on this browser, open the extension settings, then paste your access code.</p>
+      <div class="code">
+        <span>Your access code</span>
+        <strong id="accessCode">${safeCode || 'Open from the app'}</strong>
+      </div>
+      <button type="button" onclick="navigator.clipboard?.writeText(document.getElementById('accessCode').textContent)">Copy access code</button>
+      <div class="stores">
+        ${storeLink('Chrome / Brave', chromeUrl)}
+        ${storeLink('Microsoft Edge', edgeUrl)}
+        ${storeLink('Firefox', firefoxUrl)}
+      </div>
+      <ol class="steps">
+        <li>Install the Freeman extension for your browser.</li>
+        <li>Open the extension popup, then open Settings.</li>
+        <li>Paste the access code and press Link app.</li>
+        <li>Turn on protection and allow Incognito/private browsing if needed.</li>
+      </ol>
+      <p class="note">If the store links are not active yet, the extension still needs to be published to the browser stores.</p>
+    </main>
+  </body>
+</html>`;
+}
+
 function readBody(req) {
   return new Promise((resolve, reject) => {
     let body = '';
@@ -324,6 +490,12 @@ const server = http.createServer((req, res) => {
       modelTimeoutMs: MODEL_TIMEOUT_MS,
       overallTimeoutMs: AI_OVERALL_TIMEOUT_MS,
     });
+    return;
+  }
+
+  if (req.method === 'GET' && req.url.startsWith('/extension')) {
+    const url = new URL(req.url, 'https://freeman.local');
+    sendHtml(res, 200, extensionSetupPage(url.searchParams.get('code') || ''));
     return;
   }
 
