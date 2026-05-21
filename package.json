@@ -8,13 +8,21 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
+    "ai-proxy": "node server/openrouter-proxy.js",
     "postinstall": "node scripts/patch-expo-modules-core.js"
   },
   "dependencies": {
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "@supabase/supabase-js": "^2.105.4",
     "expo": "~54.0.20",
+    "expo-audio": "~1.1.1",
     "expo-status-bar": "~3.0.8",
+    "firebase": "^11.10.0",
+    "firebase-admin": "^13.10.0",
     "react": "19.1.0",
-    "react-native": "0.81.5"
+    "react-native": "0.81.5",
+    "react-native-svg": "15.12.1",
+    "react-native-url-polyfill": "^3.0.0"
   },
   "devDependencies": {
     "@expo/ngrok": "^4.1.3",

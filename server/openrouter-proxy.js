@@ -2,6 +2,9 @@ const http = require('http');
 
 const PORT = Number(process.env.PORT || 8787);
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
+const RESEND_API_KEY = process.env.RESEND_API_KEY;
+const RESEND_FROM_EMAIL = process.env.RESEND_FROM_EMAIL || 'Freeman <verify@freemanapp.online>';
+const AUTH_CONTINUE_URL = process.env.AUTH_CONTINUE_URL || 'https://www.freemanapp.online/';
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const DEFAULT_MODELS = [
   'deepseek/deepseek-v4-flash:free',
@@ -38,6 +41,7 @@ const recoveryScope =
   'Freeman AI only helps users beat porn/sexual-content addiction, manage urges, recover after relapse, build healthy routines, improve accountability, and protect their streak. In this recovery context, "gooning" means masturbating with heavy porn consumption. Refuse unrelated topics briefly and redirect to recovery support.';
 
 const requestLog = new Map();
+let firebaseAdmin;
 
 function sendJson(res, status, body, requestId) {
   res.writeHead(status, {
@@ -57,6 +61,43 @@ function sendHtml(res, status, html) {
     'Cache-Control': 'no-store',
   });
   res.end(html);
+}
+
+function getFirebaseAdmin() {
+  if (firebaseAdmin !== undefined) return firebaseAdmin;
+
+  try {
+    const admin = require('firebase-admin');
+    if (!admin.apps.length) {
+      const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+      const projectId = process.env.FIREBASE_PROJECT_ID;
+      const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+      const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n');
+
+      if (serviceAccountJson) {
+        admin.initializeApp({
+          credential: admin.credential.cert(JSON.parse(serviceAccountJson)),
+        });
+      } else if (projectId && clientEmail && privateKey) {
+        admin.initializeApp({
+          credential: admin.credential.cert({
+            projectId,
+            clientEmail,
+            privateKey,
+          }),
+        });
+      } else {
+        firebaseAdmin = null;
+        return firebaseAdmin;
+      }
+    }
+    firebaseAdmin = admin;
+    return firebaseAdmin;
+  } catch (error) {
+    console.warn('Firebase Admin unavailable:', error.message);
+    firebaseAdmin = null;
+    return firebaseAdmin;
+  }
 }
 
 function escapeHtml(value) {
@@ -338,6 +379,126 @@ function providerFallbackReply(text) {
   return 'The AI provider is slow right now. Keep this recovery-focused: name the feeling, remove the easiest trigger, and take one small action that protects your streak for the next ten minutes.';
 }
 
+function verificationEmailHtml(link) {
+  const safeLink = escapeHtml(link);
+
+  return `<!doctype html>
+<html lang="en">
+  <body style="margin:0;background:#07090f;color:#f8fafc;font-family:Inter,Arial,sans-serif;padding:28px;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;margin:0 auto;background:#0e1220;border:1px solid #1c2536;border-radius:24px;padding:0;">
+      <tr>
+        <td style="padding:28px;">
+          <p style="margin:0 0 8px;color:#3d8f6b;font-size:12px;font-weight:800;letter-spacing:2px;text-transform:uppercase;">Freeman</p>
+          <h1 style="margin:0 0 12px;color:#ffffff;font-size:30px;line-height:1.12;">Confirm your email</h1>
+          <p style="margin:0 0 22px;color:#94a3b8;font-size:15px;line-height:1.6;">Confirm this email address to finish setting up your Freeman account.</p>
+          <a href="${safeLink}" style="display:inline-block;background:#3d8f6b;color:#07100d;text-decoration:none;font-weight:900;font-size:15px;padding:14px 22px;border-radius:14px;">Verify email</a>
+          <p style="margin:22px 0 0;color:#64748b;font-size:13px;line-height:1.55;">If the button does not work, copy and paste this link into your browser:</p>
+          <p style="word-break:break-all;margin:8px 0 0;color:#94a3b8;font-size:12px;line-height:1.5;">${safeLink}</p>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`;
+}
+
+function verificationEmailText(link) {
+  return `Confirm your Freeman email address:\n\n${link}\n\nAfter confirming, return to the Freeman app and log in.`;
+}
+
+async function sendResendEmail({ to, subject, html, text }) {
+  const response = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${RESEND_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      from: RESEND_FROM_EMAIL,
+      to,
+      subject,
+      html,
+      text,
+    }),
+  });
+
+  const body = await response.text();
+  let data;
+  try {
+    data = body ? JSON.parse(body) : {};
+  } catch {
+    data = { raw: body };
+  }
+
+  if (!response.ok) {
+    const error = new Error(data?.message || data?.error || `Resend failed with ${response.status}`);
+    error.status = response.status;
+    throw error;
+  }
+
+  return data;
+}
+
+async function handleSendVerificationEmail(req, res) {
+  const requestId = makeRequestId();
+  const admin = getFirebaseAdmin();
+
+  if (!admin) {
+    sendJson(res, 503, { error: 'Firebase Admin is not configured on the backend', code: 'FIREBASE_ADMIN_NOT_CONFIGURED' }, requestId);
+    return;
+  }
+
+  if (!RESEND_API_KEY) {
+    sendJson(res, 503, { error: 'RESEND_API_KEY is not configured on the backend', code: 'RESEND_NOT_CONFIGURED' }, requestId);
+    return;
+  }
+
+  const ip = getClientIp(req);
+  if (isRateLimited(`verify:${ip}`)) {
+    sendJson(res, 429, { error: 'Too many verification email requests. Wait a minute and try again.', code: 'RATE_LIMITED' }, requestId);
+    return;
+  }
+
+  let payload;
+  try {
+    payload = JSON.parse(await readBody(req));
+  } catch {
+    sendJson(res, 400, { error: 'Invalid JSON body', code: 'BAD_JSON' }, requestId);
+    return;
+  }
+
+  const idToken = String(payload.idToken || '').trim();
+  if (!idToken) {
+    sendJson(res, 400, { error: 'Missing Firebase ID token', code: 'MISSING_ID_TOKEN' }, requestId);
+    return;
+  }
+
+  try {
+    const decoded = await admin.auth().verifyIdToken(idToken);
+    const email = decoded.email;
+    if (!email) {
+      sendJson(res, 400, { error: 'Firebase account has no email address', code: 'EMAIL_MISSING' }, requestId);
+      return;
+    }
+
+    const link = await admin.auth().generateEmailVerificationLink(email, {
+      url: AUTH_CONTINUE_URL,
+      handleCodeInApp: false,
+    });
+
+    await sendResendEmail({
+      to: email,
+      subject: 'Verify your Freeman account',
+      html: verificationEmailHtml(link),
+      text: verificationEmailText(link),
+    });
+
+    sendJson(res, 200, { ok: true, email }, requestId);
+  } catch (error) {
+    console.warn(`[${requestId}] verification email failed: ${error.message}`);
+    sendJson(res, error.status || 500, { error: error.message || 'Could not send verification email', code: 'VERIFICATION_EMAIL_FAILED' }, requestId);
+  }
+}
+
 function isRetryableError(error) {
   const message = String(error.message || '').toLowerCase();
   const modelUnavailable =
@@ -501,6 +662,13 @@ const server = http.createServer((req, res) => {
 
   if (req.method === 'POST' && req.url === '/api/chat') {
     handleChat(req, res).catch((error) => {
+      sendJson(res, 500, { error: error.message || 'Unexpected backend error', code: 'UNEXPECTED_ERROR' });
+    });
+    return;
+  }
+
+  if (req.method === 'POST' && req.url === '/api/auth/send-verification') {
+    handleSendVerificationEmail(req, res).catch((error) => {
       sendJson(res, 500, { error: error.message || 'Unexpected backend error', code: 'UNEXPECTED_ERROR' });
     });
     return;
