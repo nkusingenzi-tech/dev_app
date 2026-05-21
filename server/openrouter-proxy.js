@@ -432,6 +432,7 @@ async function sendResendEmail({ to, subject, html, text }) {
   if (!response.ok) {
     const error = new Error(data?.message || data?.error || `Resend failed with ${response.status}`);
     error.status = response.status;
+    error.code = 'EMAIL_SEND_FAILED';
     throw error;
   }
 
