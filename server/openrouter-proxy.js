@@ -387,6 +387,20 @@ function verificationEmailHtml(link) {
 
   return `<!doctype html>
 <html lang="en">
+  <head>
+    <style>
+      @keyframes freemanVerifyPulse {
+        0%, 100% { transform: scale(1); box-shadow: 0 0 0 rgba(61,143,107,0); }
+        50% { transform: scale(1.035); box-shadow: 0 0 22px rgba(61,143,107,0.32); }
+      }
+      .freeman-verify-button {
+        animation: freemanVerifyPulse 2.4s ease-in-out infinite;
+      }
+      .freeman-verify-button:hover {
+        transform: scale(1.04);
+      }
+    </style>
+  </head>
   <body style="margin:0;background:#07090f;color:#f8fafc;font-family:Inter,Arial,sans-serif;padding:28px;">
     <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;margin:0 auto;background:#0e1220;border:1px solid #1c2536;border-radius:24px;padding:0;">
       <tr>
@@ -394,7 +408,7 @@ function verificationEmailHtml(link) {
           <p style="margin:0 0 8px;color:#3d8f6b;font-size:12px;font-weight:800;letter-spacing:2px;text-transform:uppercase;">Freeman</p>
           <h1 style="margin:0 0 12px;color:#ffffff;font-size:30px;line-height:1.12;">Confirm your email</h1>
           <p style="margin:0 0 22px;color:#94a3b8;font-size:15px;line-height:1.6;">Confirm this email address to finish setting up your Freeman account.</p>
-          <a href="${safeLink}" style="display:inline-block;background:#3d8f6b;color:#07100d;text-decoration:none;font-weight:900;font-size:15px;padding:14px 22px;border-radius:14px;">Verify email</a>
+          <a class="freeman-verify-button" href="${safeLink}" style="display:inline-block;background:#3d8f6b;color:#07100d;text-decoration:none;font-weight:900;font-size:15px;padding:14px 22px;border-radius:14px;box-shadow:0 10px 26px rgba(61,143,107,0.24);transition:transform 160ms ease,box-shadow 160ms ease;">Verify email</a>
           <p style="margin:22px 0 0;color:#64748b;font-size:13px;line-height:1.55;">If the button does not work, copy and paste this link into your browser:</p>
           <p style="word-break:break-all;margin:8px 0 0;color:#94a3b8;font-size:12px;line-height:1.5;">${safeLink}</p>
         </td>
@@ -671,7 +685,10 @@ async function handleVerifyEmail(req, res) {
       body{margin:0;min-height:100vh;background:#07090f;color:#f8fafc;font-family:Inter,Arial,sans-serif;display:flex;align-items:center;justify-content:center;padding:24px}
       main{max-width:520px;background:#0e1220;border:1px solid #1c2536;border-radius:24px;padding:28px}
       p{color:#94a3b8;line-height:1.55}
-      a{display:inline-block;margin-top:12px;background:#3d8f6b;color:#07100d;text-decoration:none;font-weight:900;padding:13px 18px;border-radius:14px}
+      @keyframes openButtonBreathe{0%,100%{transform:scale(1);box-shadow:0 10px 28px rgba(61,143,107,.22)}50%{transform:scale(1.025);box-shadow:0 14px 36px rgba(61,143,107,.36)}}
+      a{display:inline-block;margin-top:12px;background:#3d8f6b;color:#07100d;text-decoration:none;font-weight:900;padding:13px 18px;border-radius:14px;box-shadow:0 10px 28px rgba(61,143,107,.22);transition:transform .16s ease,box-shadow .16s ease;animation:openButtonBreathe 2.5s ease-in-out infinite}
+      a:hover{transform:scale(1.045);box-shadow:0 16px 42px rgba(61,143,107,.42)}
+      a:active{transform:scale(.94);box-shadow:0 6px 18px rgba(61,143,107,.24)}
     </style>
   </head>
   <body>
