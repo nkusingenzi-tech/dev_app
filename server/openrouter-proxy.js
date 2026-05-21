@@ -1,10 +1,12 @@
 const http = require('http');
+const crypto = require('crypto');
 
 const PORT = Number(process.env.PORT || 8787);
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const RESEND_FROM_EMAIL = process.env.RESEND_FROM_EMAIL || 'Freeman <verify@freemanapp.online>';
 const AUTH_CONTINUE_URL = process.env.AUTH_CONTINUE_URL || 'https://www.freemanapp.online/';
+const EMAIL_VERIFY_SECRET = process.env.EMAIL_VERIFY_SECRET || RESEND_API_KEY || OPENROUTER_API_KEY || 'freeman-dev-email-secret';
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const DEFAULT_MODELS = [
   'deepseek/deepseek-v4-flash:free',
@@ -405,21 +407,58 @@ function verificationEmailText(link) {
   return `Confirm your Freeman email address:\n\n${link}\n\nAfter confirming, return to the Freeman app and log in.`;
 }
 
-async function generateVerificationLink(admin, email) {
-  try {
-    return await admin.auth().generateEmailVerificationLink(email, {
-      url: AUTH_CONTINUE_URL,
-      handleCodeInApp: false,
-    });
-  } catch (error) {
-    const code = String(error?.code || error?.message || '').toLowerCase();
-    if (!code.includes('unauthorized-continue-uri') && !code.includes('invalid-continue-uri')) {
-      throw error;
-    }
+function base64UrlEncode(value) {
+  return Buffer.from(value).toString('base64url');
+}
 
-    console.warn(`Firebase rejected AUTH_CONTINUE_URL (${AUTH_CONTINUE_URL}); using default verification link.`);
-    return admin.auth().generateEmailVerificationLink(email);
+function base64UrlDecode(value) {
+  return Buffer.from(value, 'base64url').toString('utf8');
+}
+
+function signEmailVerificationPayload(payload) {
+  return crypto.createHmac('sha256', EMAIL_VERIFY_SECRET).update(payload).digest('base64url');
+}
+
+function getRequestOrigin(req) {
+  const proto = String(req.headers['x-forwarded-proto'] || 'https').split(',')[0].trim() || 'https';
+  const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
+  return host ? `${proto}://${host}` : 'https://freeman-ai-proxy.onrender.com';
+}
+
+function createVerificationToken(uid, email) {
+  const payload = base64UrlEncode(JSON.stringify({
+    uid,
+    email,
+    exp: Date.now() + 24 * 60 * 60 * 1000,
+  }));
+  const signature = signEmailVerificationPayload(payload);
+  return `${payload}.${signature}`;
+}
+
+function verifyEmailToken(token) {
+  const [payload, signature] = String(token || '').split('.');
+  if (!payload || !signature) {
+    throw new Error('Invalid verification link.');
   }
+
+  const expected = signEmailVerificationPayload(payload);
+  const givenBuffer = Buffer.from(signature);
+  const expectedBuffer = Buffer.from(expected);
+  if (givenBuffer.length !== expectedBuffer.length || !crypto.timingSafeEqual(givenBuffer, expectedBuffer)) {
+    throw new Error('Invalid verification link.');
+  }
+
+  const data = JSON.parse(base64UrlDecode(payload));
+  if (!data.uid || !data.email || !data.exp || Date.now() > Number(data.exp)) {
+    throw new Error('Verification link expired. Return to the app and request a new one.');
+  }
+
+  return data;
+}
+
+function generateVerificationLink(req, uid, email) {
+  const token = encodeURIComponent(createVerificationToken(uid, email));
+  return `${getRequestOrigin(req)}/api/auth/verify-email?token=${token}`;
 }
 
 async function sendResendEmail({ to, subject, html, text }) {
@@ -498,7 +537,7 @@ async function handleSendVerificationEmail(req, res) {
       return;
     }
 
-    const link = await generateVerificationLink(admin, email);
+    const link = generateVerificationLink(req, decoded.uid, email);
 
     await sendResendEmail({
       to: email,
@@ -575,7 +614,7 @@ async function handleSignup(req, res) {
       }
     }
 
-    const link = await generateVerificationLink(admin, email);
+    const link = generateVerificationLink(req, userRecord.uid, email);
 
     await sendResendEmail({
       to: email,
@@ -593,6 +632,62 @@ async function handleSignup(req, res) {
   } catch (error) {
     console.warn(`[${requestId}] signup failed: ${error.message}`);
     sendJson(res, error.status || 500, { error: error.message || 'Could not create account', code: error.code || 'SIGNUP_FAILED' }, requestId);
+  }
+}
+
+async function handleVerifyEmail(req, res) {
+  const admin = getFirebaseAdmin();
+
+  if (!admin) {
+    sendHtml(res, 503, '<h1>Freeman verification is temporarily unavailable.</h1><p>Try again later.</p>');
+    return;
+  }
+
+  try {
+    const url = new URL(req.url, getRequestOrigin(req));
+    const token = url.searchParams.get('token');
+    const payload = verifyEmailToken(token);
+    const userRecord = await admin.auth().getUser(payload.uid);
+
+    if (userRecord.email?.toLowerCase() !== String(payload.email).toLowerCase()) {
+      throw new Error('This verification link does not match the account email.');
+    }
+
+    if (!userRecord.emailVerified) {
+      await admin.auth().updateUser(payload.uid, { emailVerified: true });
+    }
+
+    sendHtml(
+      res,
+      200,
+      `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Freeman email verified</title>
+    <style>
+      body{margin:0;min-height:100vh;background:#07090f;color:#f8fafc;font-family:Inter,Arial,sans-serif;display:flex;align-items:center;justify-content:center;padding:24px}
+      main{max-width:520px;background:#0e1220;border:1px solid #1c2536;border-radius:24px;padding:28px}
+      p{color:#94a3b8;line-height:1.55}
+      a{display:inline-block;margin-top:12px;background:#3d8f6b;color:#07100d;text-decoration:none;font-weight:900;padding:13px 18px;border-radius:14px}
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Email confirmed</h1>
+      <p>Your Freeman account is verified. Return to the app and log in.</p>
+      <a href="${escapeHtml(AUTH_CONTINUE_URL)}">Open Freeman</a>
+    </main>
+  </body>
+</html>`,
+    );
+  } catch (error) {
+    sendHtml(
+      res,
+      400,
+      `<!doctype html><html lang="en"><body style="font-family:Arial,sans-serif;background:#07090f;color:#f8fafc;padding:28px"><h1>Verification failed</h1><p>${escapeHtml(error.message || 'The verification link is invalid.')}</p></body></html>`,
+    );
   }
 }
 
@@ -754,6 +849,13 @@ const server = http.createServer((req, res) => {
   if (req.method === 'GET' && req.url.startsWith('/extension')) {
     const url = new URL(req.url, 'https://freeman.local');
     sendHtml(res, 200, extensionSetupPage(url.searchParams.get('code') || ''));
+    return;
+  }
+
+  if (req.method === 'GET' && req.url.startsWith('/api/auth/verify-email')) {
+    handleVerifyEmail(req, res).catch((error) => {
+      sendHtml(res, 500, `<h1>Verification failed</h1><p>${escapeHtml(error.message || 'Unexpected backend error')}</p>`);
+    });
     return;
   }
 
