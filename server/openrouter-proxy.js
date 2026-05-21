@@ -499,6 +499,91 @@ async function handleSendVerificationEmail(req, res) {
   }
 }
 
+async function handleSignup(req, res) {
+  const requestId = makeRequestId();
+  const admin = getFirebaseAdmin();
+
+  if (!admin) {
+    sendJson(res, 503, { error: 'Firebase Admin is not configured on the backend', code: 'FIREBASE_ADMIN_NOT_CONFIGURED' }, requestId);
+    return;
+  }
+
+  if (!RESEND_API_KEY) {
+    sendJson(res, 503, { error: 'RESEND_API_KEY is not configured on the backend', code: 'RESEND_NOT_CONFIGURED' }, requestId);
+    return;
+  }
+
+  const ip = getClientIp(req);
+  if (isRateLimited(`signup:${ip}`)) {
+    sendJson(res, 429, { error: 'Too many signup attempts. Wait a minute and try again.', code: 'RATE_LIMITED' }, requestId);
+    return;
+  }
+
+  let payload;
+  try {
+    payload = JSON.parse(await readBody(req));
+  } catch {
+    sendJson(res, 400, { error: 'Invalid JSON body', code: 'BAD_JSON' }, requestId);
+    return;
+  }
+
+  const email = String(payload.email || '').trim().toLowerCase();
+  const password = String(payload.password || '');
+  const username = String(payload.username || '').trim().slice(0, 50);
+
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || password.length < 6 || !username) {
+    sendJson(res, 400, { error: 'Enter username, valid email, and a 6+ character password.', code: 'BAD_SIGNUP_INPUT' }, requestId);
+    return;
+  }
+
+  try {
+    let userRecord;
+    let created = false;
+
+    try {
+      userRecord = await admin.auth().createUser({
+        email,
+        password,
+        displayName: username,
+        emailVerified: false,
+      });
+      created = true;
+    } catch (error) {
+      if (error?.code !== 'auth/email-already-exists') {
+        throw error;
+      }
+
+      userRecord = await admin.auth().getUserByEmail(email);
+      if (userRecord.emailVerified) {
+        sendJson(res, 409, { error: 'Account already exists. Log in instead.', code: 'ACCOUNT_EXISTS' }, requestId);
+        return;
+      }
+    }
+
+    const link = await admin.auth().generateEmailVerificationLink(email, {
+      url: AUTH_CONTINUE_URL,
+      handleCodeInApp: false,
+    });
+
+    await sendResendEmail({
+      to: email,
+      subject: 'Verify your Freeman account',
+      html: verificationEmailHtml(link),
+      text: verificationEmailText(link),
+    });
+
+    sendJson(res, 200, {
+      ok: true,
+      created,
+      uid: userRecord.uid,
+      email,
+    }, requestId);
+  } catch (error) {
+    console.warn(`[${requestId}] signup failed: ${error.message}`);
+    sendJson(res, error.status || 500, { error: error.message || 'Could not create account', code: error.code || 'SIGNUP_FAILED' }, requestId);
+  }
+}
+
 function isRetryableError(error) {
   const message = String(error.message || '').toLowerCase();
   const modelUnavailable =
@@ -669,6 +754,13 @@ const server = http.createServer((req, res) => {
 
   if (req.method === 'POST' && req.url === '/api/auth/send-verification') {
     handleSendVerificationEmail(req, res).catch((error) => {
+      sendJson(res, 500, { error: error.message || 'Unexpected backend error', code: 'UNEXPECTED_ERROR' });
+    });
+    return;
+  }
+
+  if (req.method === 'POST' && req.url === '/api/auth/signup') {
+    handleSignup(req, res).catch((error) => {
       sendJson(res, 500, { error: error.message || 'Unexpected backend error', code: 'UNEXPECTED_ERROR' });
     });
     return;
