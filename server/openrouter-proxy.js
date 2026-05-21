@@ -6,6 +6,7 @@ const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const RESEND_FROM_EMAIL = process.env.RESEND_FROM_EMAIL || 'Freeman <verify@freemanapp.online>';
 const AUTH_CONTINUE_URL = process.env.AUTH_CONTINUE_URL || 'https://www.freemanapp.online/';
+const APP_OPEN_URL = process.env.APP_OPEN_URL || 'freeman://login-callback';
 const EMAIL_VERIFY_SECRET = process.env.EMAIL_VERIFY_SECRET || RESEND_API_KEY || OPENROUTER_API_KEY || 'freeman-dev-email-secret';
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const DEFAULT_MODELS = [
@@ -677,7 +678,8 @@ async function handleVerifyEmail(req, res) {
     <main>
       <h1>Email confirmed</h1>
       <p>Your Freeman account is verified. Return to the app and log in.</p>
-      <a href="${escapeHtml(AUTH_CONTINUE_URL)}">Open Freeman</a>
+      <a href="${escapeHtml(APP_OPEN_URL)}">Open Freeman</a>
+      <p>If the button does not open the app, close this page and open Freeman from your home screen.</p>
     </main>
   </body>
 </html>`,
