@@ -405,6 +405,23 @@ function verificationEmailText(link) {
   return `Confirm your Freeman email address:\n\n${link}\n\nAfter confirming, return to the Freeman app and log in.`;
 }
 
+async function generateVerificationLink(admin, email) {
+  try {
+    return await admin.auth().generateEmailVerificationLink(email, {
+      url: AUTH_CONTINUE_URL,
+      handleCodeInApp: false,
+    });
+  } catch (error) {
+    const code = String(error?.code || error?.message || '').toLowerCase();
+    if (!code.includes('unauthorized-continue-uri') && !code.includes('invalid-continue-uri')) {
+      throw error;
+    }
+
+    console.warn(`Firebase rejected AUTH_CONTINUE_URL (${AUTH_CONTINUE_URL}); using default verification link.`);
+    return admin.auth().generateEmailVerificationLink(email);
+  }
+}
+
 async function sendResendEmail({ to, subject, html, text }) {
   const response = await fetch('https://api.resend.com/emails', {
     method: 'POST',
@@ -481,10 +498,7 @@ async function handleSendVerificationEmail(req, res) {
       return;
     }
 
-    const link = await admin.auth().generateEmailVerificationLink(email, {
-      url: AUTH_CONTINUE_URL,
-      handleCodeInApp: false,
-    });
+    const link = await generateVerificationLink(admin, email);
 
     await sendResendEmail({
       to: email,
@@ -561,10 +575,7 @@ async function handleSignup(req, res) {
       }
     }
 
-    const link = await admin.auth().generateEmailVerificationLink(email, {
-      url: AUTH_CONTINUE_URL,
-      handleCodeInApp: false,
-    });
+    const link = await generateVerificationLink(admin, email);
 
     await sendResendEmail({
       to: email,
