@@ -5,17 +5,17 @@ const PORT = Number(process.env.PORT || 8787);
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const RESEND_FROM_EMAIL = process.env.RESEND_FROM_EMAIL || 'Freeman <verify@freemanapp.online>';
+const PRIVACY_CONTACT_EMAIL = process.env.PRIVACY_CONTACT_EMAIL || 'support@freemanapp.online';
 const AUTH_CONTINUE_URL = process.env.AUTH_CONTINUE_URL || 'https://www.freemanapp.online/';
 const APP_OPEN_URL = process.env.APP_OPEN_URL || 'freeman://login-callback';
 const EMAIL_VERIFY_SECRET = process.env.EMAIL_VERIFY_SECRET || RESEND_API_KEY || OPENROUTER_API_KEY || 'freeman-dev-email-secret';
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const DEFAULT_MODELS = [
-  'deepseek/deepseek-v4-flash:free',
+  'openrouter/free',
   'google/gemma-4-26b-a4b-it:free',
   'openai/gpt-oss-20b:free',
   'minimax/minimax-m2.5:free',
   'nvidia/nemotron-3-nano-30b-a3b:free',
-  'openrouter/free',
 ];
 const MODEL_TIMEOUT_MS = Number(process.env.MODEL_TIMEOUT_MS || 9000);
 const AI_OVERALL_TIMEOUT_MS = Number(process.env.AI_OVERALL_TIMEOUT_MS || 28000);
@@ -25,8 +25,10 @@ const MAX_MESSAGES = 10;
 const MAX_MESSAGE_CHARS = 2000;
 const RETRYABLE_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504]);
 const DISABLED_MODELS = new Set([
+  'deepseek/deepseek-v4-flash:free',
   'inclusionai/ring-2.6-1t:free',
 ]);
+const PREFERRED_MODEL = 'openrouter/free';
 
 function resolveModels() {
   const configuredModels = (process.env.OPENROUTER_MODELS || DEFAULT_MODELS.join(','))
@@ -35,7 +37,13 @@ function resolveModels() {
     .filter(Boolean)
     .filter((model) => !DISABLED_MODELS.has(model));
 
-  return configuredModels.length ? configuredModels : DEFAULT_MODELS;
+  const orderedModels = [
+    PREFERRED_MODEL,
+    ...configuredModels,
+    ...DEFAULT_MODELS,
+  ].filter((model) => !DISABLED_MODELS.has(model));
+
+  return [...new Set(orderedModels)];
 }
 
 const models = resolveModels();
@@ -61,9 +69,339 @@ function sendJson(res, status, body, requestId) {
 function sendHtml(res, status, html) {
   res.writeHead(status, {
     'Content-Type': 'text/html; charset=utf-8',
-    'Cache-Control': 'no-store',
+    'Cache-Control': status >= 400 ? 'no-store' : 'public, max-age=300',
   });
   res.end(html);
+}
+
+function legalPage({ title, updated, children }) {
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${escapeHtml(title)} | Freeman</title>
+    <style>
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: #07090f;
+        color: #e5edf5;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        line-height: 1.65;
+      }
+      header {
+        padding: 44px 20px 22px;
+        border-bottom: 1px solid #1b2433;
+        background: radial-gradient(circle at top, #123023 0%, #07090f 52%);
+      }
+      main, .inner {
+        width: min(880px, 100%);
+        margin: 0 auto;
+      }
+      main { padding: 28px 20px 56px; }
+      .eyebrow {
+        color: #67c093;
+        font-weight: 900;
+        letter-spacing: 1.8px;
+        text-transform: uppercase;
+        font-size: 12px;
+      }
+      h1 {
+        margin: 10px 0 8px;
+        font-size: clamp(34px, 7vw, 58px);
+        line-height: 1;
+      }
+      h2 {
+        margin: 34px 0 10px;
+        color: #f8fafc;
+        font-size: 23px;
+        line-height: 1.18;
+      }
+      h3 {
+        margin: 24px 0 8px;
+        color: #dbeafe;
+        font-size: 17px;
+      }
+      p, li { color: #b8c4d4; font-size: 15px; }
+      a { color: #72d19f; font-weight: 800; }
+      ul { padding-left: 22px; }
+      .card {
+        border: 1px solid #1f2b3d;
+        border-radius: 22px;
+        background: linear-gradient(155deg, #0e1420, #0a0e16);
+        padding: 20px;
+        margin: 20px 0;
+      }
+      .muted { color: #8fa0b5; }
+      .updated { color: #8fa0b5; margin: 0; }
+      .nav {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 18px;
+      }
+      .nav a {
+        border: 1px solid #263547;
+        border-radius: 999px;
+        padding: 8px 12px;
+        color: #dbeafe;
+        text-decoration: none;
+        background: #101827;
+      }
+      label {
+        display: block;
+        color: #dbeafe;
+        font-weight: 800;
+        margin: 14px 0 6px;
+      }
+      input, textarea {
+        width: 100%;
+        border: 1px solid #273449;
+        border-radius: 14px;
+        background: #090f18;
+        color: #f8fafc;
+        padding: 12px 14px;
+        font: inherit;
+      }
+      textarea { min-height: 120px; resize: vertical; }
+      button {
+        margin-top: 16px;
+        border: 0;
+        border-radius: 16px;
+        padding: 13px 18px;
+        background: #2f7d55;
+        color: #fff;
+        font-weight: 900;
+        font-size: 15px;
+        cursor: pointer;
+      }
+      footer {
+        border-top: 1px solid #1b2433;
+        padding: 22px 20px 34px;
+        color: #8fa0b5;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="inner">
+        <div class="eyebrow">Freeman</div>
+        <h1>${escapeHtml(title)}</h1>
+        <p class="updated">Last updated: ${escapeHtml(updated)}</p>
+        <nav class="nav" aria-label="Legal pages">
+          <a href="/privacy">Privacy Policy</a>
+          <a href="/terms">Terms</a>
+          <a href="/delete-account">Delete Account</a>
+        </nav>
+      </div>
+    </header>
+    <main>${children}</main>
+    <footer>
+      <div class="inner">Freeman support: <a href="mailto:${escapeHtml(PRIVACY_CONTACT_EMAIL)}">${escapeHtml(PRIVACY_CONTACT_EMAIL)}</a></div>
+    </footer>
+  </body>
+</html>`;
+}
+
+function privacyPolicyPage() {
+  return legalPage({
+    title: 'Privacy Policy',
+    updated: 'May 23, 2026',
+    children: `
+      <div class="card">
+        <p>This Privacy Policy explains how Freeman ("Freeman", "the app", "we", "our", or "us") collects, uses, stores, and shares information when you use the Freeman mobile app, Freeman browser extension, and related backend services.</p>
+        <p>The app is designed for personal recovery support from pornography and compulsive sexual-content use. Because recovery information can be sensitive, Freeman intentionally keeps detailed recovery logs on your device unless a feature clearly needs cloud processing.</p>
+      </div>
+
+      <h2>Developer and privacy contact</h2>
+      <p>For privacy questions, account deletion, or data requests, contact us at <a href="mailto:${escapeHtml(PRIVACY_CONTACT_EMAIL)}">${escapeHtml(PRIVACY_CONTACT_EMAIL)}</a>.</p>
+
+      <h2>Information Freeman collects or stores</h2>
+      <h3>Account and authentication data</h3>
+      <ul>
+        <li>Email address, Firebase user ID, display name/username, authentication provider, and email verification status.</li>
+        <li>Google sign-in profile identifiers when you choose Google sign-in.</li>
+      </ul>
+
+      <h3>Profile and onboarding data</h3>
+      <ul>
+        <li>Onboarding answers, selected recovery goals, motivation, risky time, risky apps/categories, accountability contact field if entered, usual sleep/check-in reminder time, plan selection, widget setup state, and content blocker guide state.</li>
+        <li>Subscription state such as selected plan, Premium active status, trial/active/expired status, expiry date, and RevenueCat entitlement state.</li>
+      </ul>
+
+      <h3>Recovery data stored locally on your device</h3>
+      <ul>
+        <li>Daily check-ins, relapse status, notes, triggers, streak state, freeze/unfreeze state, score, and relapse history are stored locally on your device for the current app design.</li>
+        <li>Freeman does not intentionally upload detailed check-in notes, relapse notes, trigger text, or full recovery logs to our server by default.</li>
+      </ul>
+
+      <h3>AI assistant messages</h3>
+      <ul>
+        <li>Messages you send to the AI assistant are sent to Freeman's backend so the assistant can respond.</li>
+        <li>The backend sends the minimum conversation content needed to an AI provider through OpenRouter. Do not enter emergency, medical, financial, legal, or highly identifying information into the chat.</li>
+      </ul>
+
+      <h3>Content blocker and VPN data</h3>
+      <ul>
+        <li>The Android content blocker uses a local VPN-style network interface to help filter adult domains on the device.</li>
+        <li>Filtering decisions are intended to happen locally on the device. Freeman does not sell browsing history and does not use content blocker traffic for advertising.</li>
+        <li>Android may show a VPN/key icon while filtering is active because the local blocker uses Android VPN APIs.</li>
+      </ul>
+
+      <h3>Browser extension data</h3>
+      <ul>
+        <li>The extension stores its settings locally in the browser, including custom blocked sites and pairing state.</li>
+        <li>The extension checks a Firebase pairing record to confirm that your Freeman Premium account is active. The pairing record can include access code, user ID, email, username, selected plan, Premium status, and whether browser access is enabled.</li>
+      </ul>
+
+      <h3>Device, diagnostics, and service data</h3>
+      <ul>
+        <li>We may process IP address, request timing, backend request IDs, rate-limit counters, error messages, and basic server logs to secure and operate the service.</li>
+        <li>App stores, Firebase, RevenueCat, Google Play, Resend, Render, and OpenRouter may process technical logs according to their own policies.</li>
+      </ul>
+
+      <h2>How Freeman uses information</h2>
+      <ul>
+        <li>Create and secure your account.</li>
+        <li>Remember onboarding, reminder, widget, content blocker, subscription, and extension pairing settings.</li>
+        <li>Provide recovery tracking, streak features, local reminders, AI support, content blocker guidance, and browser extension access.</li>
+        <li>Verify subscriptions and trial/paid access.</li>
+        <li>Send account verification and support emails.</li>
+        <li>Prevent abuse, rate-limit requests, debug errors, and improve reliability.</li>
+      </ul>
+
+      <h2>Sharing and processors</h2>
+      <p>Freeman does not sell personal data. We share data only with service providers needed to run the app:</p>
+      <ul>
+        <li><strong>Firebase/Google:</strong> authentication, Firestore profile/pairing records, and Google sign-in.</li>
+        <li><strong>RevenueCat and Google Play:</strong> subscription, trial, purchase, and entitlement verification.</li>
+        <li><strong>OpenRouter and AI model providers:</strong> AI assistant messages needed to generate replies.</li>
+        <li><strong>Resend:</strong> account verification and support email delivery.</li>
+        <li><strong>Render:</strong> backend hosting and operational logs.</li>
+        <li><strong>Browser stores:</strong> extension distribution if you install the extension from a browser marketplace.</li>
+      </ul>
+
+      <h2>Security</h2>
+      <ul>
+        <li>Freeman uses HTTPS for backend communication.</li>
+        <li>Firebase Authentication manages account sign-in.</li>
+        <li>Firestore security rules should restrict user profile records to authenticated users and approved extension pairing reads.</li>
+        <li>Detailed recovery logs are kept locally by default to reduce cloud exposure.</li>
+      </ul>
+
+      <h2>Data retention and deletion</h2>
+      <ul>
+        <li>Local recovery data remains on your device until you clear app data, uninstall the app, or a future in-app deletion flow removes it.</li>
+        <li>Cloud account/profile records are retained while your account is active.</li>
+        <li>You can request deletion at <a href="/delete-account">/delete-account</a>. After verification, we will delete or anonymize associated Firebase profile and pairing records and, where technically possible, authentication records.</li>
+        <li>Some records may be retained if required for security, fraud prevention, legal compliance, payment records, or backup integrity.</li>
+      </ul>
+
+      <h2>Your choices</h2>
+      <ul>
+        <li>You can avoid entering sensitive free-text notes.</li>
+        <li>You can disable the content blocker at any time in the app.</li>
+        <li>You can unlink or stop using the browser extension.</li>
+        <li>You can request account deletion or ask privacy questions by email.</li>
+      </ul>
+
+      <h2>Children</h2>
+      <p>Freeman is not intended for children under 13. If you believe a child provided personal information, contact us so we can review and delete it where appropriate.</p>
+
+      <h2>Changes</h2>
+      <p>We may update this Privacy Policy as the app changes. The "Last updated" date shows the latest version.</p>
+    `,
+  });
+}
+
+function termsPage() {
+  return legalPage({
+    title: 'Terms and Conditions',
+    updated: 'May 23, 2026',
+    children: `
+      <div class="card">
+        <p>These Terms and Conditions govern your use of Freeman, including the mobile app, browser extension, AI assistant, content blocker features, and related backend services.</p>
+      </div>
+
+      <h2>Recovery support, not medical care</h2>
+      <p>Freeman is a self-help and habit recovery tool. It is not medical, psychological, legal, or emergency advice. If you may harm yourself or someone else, or you need urgent mental health support, contact local emergency services or a qualified professional immediately.</p>
+
+      <h2>Accounts</h2>
+      <ul>
+        <li>You are responsible for keeping your account credentials secure.</li>
+        <li>You must provide accurate account information and use an email address you control.</li>
+        <li>You may request account deletion at <a href="/delete-account">/delete-account</a>.</li>
+      </ul>
+
+      <h2>Acceptable use</h2>
+      <ul>
+        <li>Do not use Freeman for illegal activity, harassment, abuse, spying, or harming other users.</li>
+        <li>Do not attempt to bypass, overload, reverse engineer, or attack Freeman backend services.</li>
+        <li>Do not submit content to the AI assistant that you do not have the right to share.</li>
+      </ul>
+
+      <h2>AI assistant limitations</h2>
+      <p>The AI assistant is designed only for recovery support related to pornography/sexual-content addiction, urges, relapse reflection, routines, and accountability. AI responses may be incomplete or wrong. You are responsible for decisions you make based on the app.</p>
+
+      <h2>Content blocker limitations</h2>
+      <p>The content blocker and browser extension are protective tools, not guarantees. No blocker can catch every website, app, phrase, image, DNS path, private browsing mode, browser, network configuration, or future bypass method. You are responsible for device settings, permissions, and supervision decisions.</p>
+
+      <h2>Subscriptions and trials</h2>
+      <ul>
+        <li>Freeman Premium may include a free trial and paid subscriptions managed by Google Play and RevenueCat.</li>
+        <li>One Freeman Premium subscription unlocks Premium app features and browser extension access together.</li>
+        <li>Trials and subscriptions renew, cancel, expire, and refund according to Google Play rules and your Google Play account settings.</li>
+        <li>If payment fails, a trial ends, or a subscription expires, Premium access and browser extension pairing may stop automatically.</li>
+      </ul>
+
+      <h2>Availability</h2>
+      <p>We may change, suspend, or discontinue features. Backend services, AI providers, browser stores, Firebase, Google Play, RevenueCat, Resend, or network conditions may affect availability.</p>
+
+      <h2>Disclaimer and liability</h2>
+      <p>Freeman is provided "as is" to the maximum extent allowed by law. We do not promise uninterrupted service, perfect filtering, guaranteed recovery outcomes, or error-free AI responses. To the maximum extent allowed by law, Freeman is not liable for indirect, incidental, special, consequential, or punitive damages.</p>
+
+      <h2>Contact</h2>
+      <p>Questions about these Terms can be sent to <a href="mailto:${escapeHtml(PRIVACY_CONTACT_EMAIL)}">${escapeHtml(PRIVACY_CONTACT_EMAIL)}</a>.</p>
+    `,
+  });
+}
+
+function deleteAccountPage(message = '') {
+  return legalPage({
+    title: 'Delete Account',
+    updated: 'May 23, 2026',
+    children: `
+      ${message ? `<div class="card"><p>${escapeHtml(message)}</p></div>` : ''}
+      <div class="card">
+        <p>Use this page to request deletion of your Freeman account and associated cloud data. This is the web deletion request option required for users who created an account in the app.</p>
+      </div>
+
+      <h2>What deletion includes</h2>
+      <ul>
+        <li>Firebase Authentication account where we can verify ownership.</li>
+        <li>Firestore profile settings connected to your account.</li>
+        <li>Browser extension pairing records connected to your account.</li>
+      </ul>
+
+      <h2>What may remain</h2>
+      <ul>
+        <li>Local app data on your phone until you clear app data or uninstall Freeman.</li>
+        <li>Payment records controlled by Google Play, RevenueCat, or legally required financial records.</li>
+        <li>Security logs or backup records retained for a limited period where required for abuse prevention or legal compliance.</li>
+      </ul>
+
+      <form method="post" action="/delete-account">
+        <label for="email">Freeman account email</label>
+        <input id="email" name="email" type="email" required autocomplete="email" placeholder="you@example.com" />
+        <label for="details">Optional details</label>
+        <textarea id="details" name="details" placeholder="Add anything that helps us verify or process the request. Do not include passwords."></textarea>
+        <button type="submit">Request account deletion</button>
+      </form>
+
+      <p class="muted">You can also email <a href="mailto:${escapeHtml(PRIVACY_CONTACT_EMAIL)}">${escapeHtml(PRIVACY_CONTACT_EMAIL)}</a> from your Freeman account email. We may ask you to verify account ownership before deletion.</p>
+    `,
+  });
 }
 
 function getFirebaseAdmin() {
@@ -510,6 +848,57 @@ async function sendResendEmail({ to, subject, html, text }) {
   return data;
 }
 
+async function handleDeleteAccountRequest(req, res) {
+  const ip = getClientIp(req);
+  if (isRateLimited(`delete-account:${ip}`)) {
+    sendHtml(res, 429, deleteAccountPage('Too many deletion requests from this network. Wait a minute and try again.'));
+    return;
+  }
+
+  const rawBody = await readBody(req);
+  const contentType = String(req.headers['content-type'] || '');
+  let email = '';
+  let details = '';
+
+  if (contentType.includes('application/json')) {
+    try {
+      const payload = JSON.parse(rawBody);
+      email = String(payload.email || '').trim().toLowerCase();
+      details = String(payload.details || '').trim();
+    } catch {
+      sendHtml(res, 400, deleteAccountPage('Invalid request body. Enter your account email and try again.'));
+      return;
+    }
+  } else {
+    const params = new URLSearchParams(rawBody);
+    email = String(params.get('email') || '').trim().toLowerCase();
+    details = String(params.get('details') || '').trim();
+  }
+
+  if (!email || !email.includes('@')) {
+    sendHtml(res, 400, deleteAccountPage('Enter the email address connected to your Freeman account.'));
+    return;
+  }
+
+  const safeDetails = details.slice(0, 2000);
+  if (RESEND_API_KEY) {
+    try {
+      await sendResendEmail({
+        to: PRIVACY_CONTACT_EMAIL,
+        subject: `Freeman account deletion request: ${email}`,
+        text: `Account deletion request\n\nEmail: ${email}\nIP: ${ip}\n\nDetails:\n${safeDetails || '(none)'}`,
+        html: `<h1>Freeman account deletion request</h1><p><strong>Email:</strong> ${escapeHtml(email)}</p><p><strong>IP:</strong> ${escapeHtml(ip)}</p><p><strong>Details:</strong></p><pre>${escapeHtml(safeDetails || '(none)')}</pre>`,
+      });
+    } catch (error) {
+      console.warn('Deletion request email failed:', error.message);
+      sendHtml(res, 500, deleteAccountPage(`We could not send the deletion request automatically. Email ${PRIVACY_CONTACT_EMAIL} from your Freeman account email instead.`));
+      return;
+    }
+  }
+
+  sendHtml(res, 200, deleteAccountPage(`Deletion request received for ${email}. We will review and may contact you to verify account ownership before deleting cloud records.`));
+}
+
 async function handleSendVerificationEmail(req, res) {
   const requestId = makeRequestId();
   const admin = getFirebaseAdmin();
@@ -861,6 +1250,28 @@ const server = http.createServer((req, res) => {
       models,
       modelTimeoutMs: MODEL_TIMEOUT_MS,
       overallTimeoutMs: AI_OVERALL_TIMEOUT_MS,
+    });
+    return;
+  }
+
+  if (req.method === 'GET' && req.url === '/privacy') {
+    sendHtml(res, 200, privacyPolicyPage());
+    return;
+  }
+
+  if (req.method === 'GET' && req.url === '/terms') {
+    sendHtml(res, 200, termsPage());
+    return;
+  }
+
+  if (req.method === 'GET' && req.url === '/delete-account') {
+    sendHtml(res, 200, deleteAccountPage());
+    return;
+  }
+
+  if (req.method === 'POST' && req.url === '/delete-account') {
+    handleDeleteAccountRequest(req, res).catch((error) => {
+      sendHtml(res, 500, deleteAccountPage(error.message || 'Could not submit account deletion request.'));
     });
     return;
   }
