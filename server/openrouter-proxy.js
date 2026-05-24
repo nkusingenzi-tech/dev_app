@@ -59,11 +59,23 @@ function sendJson(res, status, body, requestId) {
     'Content-Type': 'application/json',
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'Content-Type',
-    'Access-Control-Allow-Methods': 'POST, OPTIONS, GET',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS, GET, HEAD',
     'Cache-Control': 'no-store',
     ...(requestId ? { 'X-Request-Id': requestId } : {}),
   });
   res.end(JSON.stringify({ ...body, requestId }));
+}
+
+function sendJsonHead(res, status, requestId) {
+  res.writeHead(status, {
+    'Content-Type': 'application/json',
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS, GET, HEAD',
+    'Cache-Control': 'no-store',
+    ...(requestId ? { 'X-Request-Id': requestId } : {}),
+  });
+  res.end();
 }
 
 function sendHtml(res, status, html) {
@@ -72,6 +84,14 @@ function sendHtml(res, status, html) {
     'Cache-Control': status >= 400 ? 'no-store' : 'public, max-age=300',
   });
   res.end(html);
+}
+
+function sendHtmlHead(res, status) {
+  res.writeHead(status, {
+    'Content-Type': 'text/html; charset=utf-8',
+    'Cache-Control': status >= 400 ? 'no-store' : 'public, max-age=300',
+  });
+  res.end();
 }
 
 function legalPage({ title, updated, children }) {
@@ -1242,6 +1262,11 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (req.method === 'HEAD' && (req.url === '/' || req.url === '/health')) {
+    sendJsonHead(res, 200);
+    return;
+  }
+
   if (req.method === 'GET' && (req.url === '/' || req.url === '/health')) {
     sendJson(res, 200, {
       ok: true,
@@ -1251,6 +1276,11 @@ const server = http.createServer((req, res) => {
       modelTimeoutMs: MODEL_TIMEOUT_MS,
       overallTimeoutMs: AI_OVERALL_TIMEOUT_MS,
     });
+    return;
+  }
+
+  if (req.method === 'HEAD' && ['/privacy', '/terms', '/delete-account'].includes(req.url || '')) {
+    sendHtmlHead(res, 200);
     return;
   }
 

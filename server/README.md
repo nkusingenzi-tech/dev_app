@@ -15,13 +15,22 @@ Optional:
 MODEL_TIMEOUT_MS=9000
 AI_OVERALL_TIMEOUT_MS=28000
 MAX_REQUESTS_PER_MIN=20
-OPENROUTER_MODELS=deepseek/deepseek-v4-flash:free,google/gemma-4-26b-a4b-it:free,openai/gpt-oss-20b:free
+OPENROUTER_MODELS=openrouter/free,google/gemma-4-26b-a4b-it:free,openai/gpt-oss-20b:free
+PRIVACY_CONTACT_EMAIL=support@freemanapp.online
 ```
 
 ## Endpoints
 
 ```txt
 GET /health
+HEAD /health
+GET /privacy
+HEAD /privacy
+GET /terms
+HEAD /terms
+GET /delete-account
+HEAD /delete-account
+POST /delete-account
 POST /api/chat
 ```
 
@@ -30,11 +39,11 @@ POST /api/chat
 The mobile app expects:
 
 ```txt
-https://freeman-ai-proxy.onrender.com/api/chat
+https://www.freemanapp.online/api/chat
 ```
 
-If Render gives the service a different URL, update `FREEMAN_AI_PROXY_URL` in
-`src/screens/AssistantScreen.tsx` and rebuild the APK.
+The Render subdomain can remain enabled as a fallback, but production app
+builds should use the custom domain.
 
 ## Production behavior
 
