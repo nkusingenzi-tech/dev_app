@@ -8,6 +8,7 @@ const RESEND_FROM_EMAIL = process.env.RESEND_FROM_EMAIL || 'Freeman <verify@free
 const PRIVACY_CONTACT_EMAIL = process.env.PRIVACY_CONTACT_EMAIL || 'support@freemanapp.online';
 const AUTH_CONTINUE_URL = process.env.AUTH_CONTINUE_URL || 'https://www.freemanapp.online/';
 const APP_OPEN_URL = process.env.APP_OPEN_URL || 'freeman://login-callback';
+const ADMOB_PUBLISHER_ID = process.env.ADMOB_PUBLISHER_ID || 'pub-4447142275737847';
 const EMAIL_VERIFY_SECRET = process.env.EMAIL_VERIFY_SECRET || RESEND_API_KEY || OPENROUTER_API_KEY || 'freeman-dev-email-secret';
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const DEFAULT_MODELS = [
@@ -92,6 +93,14 @@ function sendHtml(res, status, html) {
 function sendHtmlHead(res, status) {
   res.writeHead(status, {
     'Content-Type': 'text/html; charset=utf-8',
+    'Cache-Control': status >= 400 ? 'no-store' : 'public, max-age=300',
+  });
+  res.end();
+}
+
+function sendTextHead(res, status) {
+  res.writeHead(status, {
+    'Content-Type': 'text/plain; charset=utf-8',
     'Cache-Control': status >= 400 ? 'no-store' : 'public, max-age=300',
   });
   res.end();
@@ -213,6 +222,7 @@ function legalPage({ title, updated, children }) {
         <h1>${escapeHtml(title)}</h1>
         <p class="updated">Last updated: ${escapeHtml(updated)}</p>
         <nav class="nav" aria-label="Legal pages">
+          <a href="/">Home</a>
           <a href="/privacy">Privacy Policy</a>
           <a href="/terms">Terms</a>
           <a href="/delete-account">Delete Account</a>
@@ -250,7 +260,7 @@ function privacyPolicyPage() {
       <h3>Profile and onboarding data</h3>
       <ul>
         <li>Onboarding answers, selected recovery goals, motivation, risky time, risky apps/categories, accountability contact field if entered, usual sleep/check-in reminder time, plan selection, widget setup state, and content blocker guide state.</li>
-        <li>Subscription state such as selected plan, Premium active status, trial/active/expired status, expiry date, and RevenueCat entitlement state.</li>
+        <li>Account and pairing state such as selected recovery plan, extension access, and local preference flags.</li>
       </ul>
 
       <h3>Recovery data stored locally on your device</h3>
@@ -281,7 +291,7 @@ function privacyPolicyPage() {
       <h3>Device, diagnostics, and service data</h3>
       <ul>
         <li>We may process IP address, request timing, backend request IDs, rate-limit counters, error messages, and basic server logs to secure and operate the service.</li>
-        <li>App stores, Firebase, RevenueCat, Google Play, Resend, Render, and OpenRouter may process technical logs according to their own policies.</li>
+        <li>App stores, Firebase, Google Play, Resend, Render, and OpenRouter may process technical logs according to their own policies.</li>
       </ul>
 
       <h2>How Freeman uses information</h2>
@@ -298,7 +308,7 @@ function privacyPolicyPage() {
       <p>Freeman does not sell personal data. We share data only with service providers needed to run the app:</p>
       <ul>
         <li><strong>Firebase/Google:</strong> authentication, Firestore profile/pairing records, and Google sign-in.</li>
-        <li><strong>RevenueCat and Google Play:</strong> subscription, trial, purchase, and entitlement verification.</li>
+        <li><strong>Google Play:</strong> store distribution and app review.</li>
         <li><strong>OpenRouter and AI model providers:</strong> AI assistant messages needed to generate replies.</li>
         <li><strong>Resend:</strong> account verification and support email delivery.</li>
         <li><strong>Render:</strong> backend hosting and operational logs.</li>
@@ -372,14 +382,12 @@ function termsPage() {
 
       <h2>Subscriptions and trials</h2>
       <ul>
-        <li>Freeman Premium may include a free trial and paid subscriptions managed by Google Play and RevenueCat.</li>
-        <li>One Freeman Premium subscription unlocks Premium app features and browser extension access together.</li>
-        <li>Trials and subscriptions renew, cancel, expire, and refund according to Google Play rules and your Google Play account settings.</li>
-        <li>If payment fails, a trial ends, or a subscription expires, Premium access and browser extension pairing may stop automatically.</li>
+        <li>Freeman is a free app and does not require a paid subscription to use the current mobile experience or browser extension pairing flow.</li>
+        <li>Feature availability may change as the app evolves.</li>
       </ul>
 
       <h2>Availability</h2>
-      <p>We may change, suspend, or discontinue features. Backend services, AI providers, browser stores, Firebase, Google Play, RevenueCat, Resend, or network conditions may affect availability.</p>
+      <p>We may change, suspend, or discontinue features. Backend services, AI providers, browser stores, Firebase, Google Play, Resend, or network conditions may affect availability.</p>
 
       <h2>Disclaimer and liability</h2>
       <p>Freeman is provided "as is" to the maximum extent allowed by law. We do not promise uninterrupted service, perfect filtering, guaranteed recovery outcomes, or error-free AI responses. To the maximum extent allowed by law, Freeman is not liable for indirect, incidental, special, consequential, or punitive damages.</p>
@@ -410,7 +418,7 @@ function deleteAccountPage(message = '') {
       <h2>What may remain</h2>
       <ul>
         <li>Local app data on your phone until you clear app data or uninstall Freeman.</li>
-        <li>Payment records controlled by Google Play, RevenueCat, or legally required financial records.</li>
+        <li>Records required by law or by service providers you use may be retained for compliance or fraud prevention.</li>
         <li>Security logs or backup records retained for a limited period where required for abuse prevention or legal compliance.</li>
       </ul>
 
@@ -471,6 +479,311 @@ function escapeHtml(value) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+function homePage() {
+  const playStoreSearchUrl = 'https://play.google.com/store/search?q=Freeman&c=apps';
+
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Freeman</title>
+    <meta name="description" content="Freeman is the official developer website for the Freeman recovery app, browser extension, and support pages." />
+    <style>
+      * { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
+      body {
+        margin: 0;
+        background:
+          radial-gradient(circle at top, rgba(53, 130, 92, 0.24), transparent 26%),
+          radial-gradient(circle at 20% 12%, rgba(43, 99, 72, 0.18), transparent 22%),
+          linear-gradient(180deg, #06080d 0%, #070b11 54%, #05070a 100%);
+        color: #eef4ee;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      a { color: inherit; }
+      .wrap { width: min(1120px, calc(100% - 40px)); margin: 0 auto; }
+      .topbar {
+        position: sticky;
+        top: 0;
+        z-index: 20;
+        backdrop-filter: blur(18px);
+        background: rgba(6, 8, 13, 0.72);
+        border-bottom: 1px solid rgba(129, 194, 152, 0.12);
+      }
+      .topbar .inner {
+        width: min(1120px, calc(100% - 40px));
+        margin: 0 auto;
+        padding: 16px 0;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 18px;
+      }
+      .brand { display: flex; align-items: center; gap: 12px; text-decoration: none; }
+      .mark {
+        width: 42px; height: 42px; border-radius: 14px;
+        background:
+          radial-gradient(circle at 30% 30%, rgba(112, 216, 150, 0.36), transparent 46%),
+          linear-gradient(145deg, #12291d, #0a1010);
+        border: 1px solid rgba(117, 201, 142, 0.22);
+        display: grid; place-items: center;
+        box-shadow: 0 14px 34px rgba(0, 0, 0, 0.34);
+        color: #81d9a4;
+        font-weight: 900;
+      }
+      .brand h1 { margin: 0; font-size: 17px; line-height: 1; }
+      .brand p { margin: 4px 0 0; color: #8ba59a; font-size: 12px; }
+      .nav { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; }
+      .nav a {
+        text-decoration: none; color: #d8e8dd; font-size: 13px; font-weight: 800;
+        padding: 10px 14px; border-radius: 999px;
+        border: 1px solid rgba(129, 194, 152, 0.14);
+        background: rgba(12, 16, 20, 0.9);
+      }
+      .hero { padding: 74px 0 34px; }
+      .hero-grid { display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 24px; align-items: stretch; }
+      .panel {
+        border: 1px solid rgba(129, 194, 152, 0.14);
+        border-radius: 28px;
+        background: linear-gradient(155deg, rgba(11, 16, 20, 0.96), rgba(8, 11, 15, 0.92));
+        box-shadow: 0 28px 80px rgba(0, 0, 0, 0.42);
+      }
+      .hero-copy { padding: 34px; }
+      .eyebrow {
+        display: inline-flex; align-items: center; gap: 8px;
+        color: #8be0a7; font-size: 12px; font-weight: 900; letter-spacing: 1.9px; text-transform: uppercase;
+      }
+      .eyebrow::before {
+        content: ""; width: 10px; height: 10px; border-radius: 999px; background: #4bbf7b;
+        box-shadow: 0 0 0 6px rgba(75, 191, 123, 0.12);
+      }
+      h2 {
+        margin: 14px 0 12px;
+        font-size: clamp(42px, 7vw, 74px);
+        line-height: 0.95;
+        letter-spacing: -1.8px;
+      }
+      .lede { margin: 0; max-width: 58ch; color: #a9b6ae; font-size: 17px; line-height: 1.7; }
+      .cta-row { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 24px; }
+      .btn {
+        display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+        text-decoration: none; border-radius: 16px; padding: 14px 18px;
+        font-weight: 900; font-size: 14px; border: 1px solid transparent;
+      }
+      .btn.primary {
+        background: linear-gradient(145deg, #3fa56f, #276f4c);
+        color: #f5fff8;
+        box-shadow: 0 18px 42px rgba(31, 126, 75, 0.24);
+      }
+      .btn.secondary {
+        background: rgba(15, 20, 26, 0.9);
+        border-color: rgba(129, 194, 152, 0.16);
+        color: #dce7df;
+      }
+      .mini-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 22px; }
+      .mini {
+        padding: 16px; border-radius: 20px;
+        background: rgba(11, 15, 19, 0.9);
+        border: 1px solid rgba(129, 194, 152, 0.12);
+      }
+      .mini strong { display: block; margin-bottom: 6px; font-size: 13px; color: #eef4ee; }
+      .mini span { color: #94a99f; font-size: 13px; line-height: 1.55; }
+      .side {
+        padding: 22px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        gap: 18px;
+      }
+      .app-card {
+        padding: 24px;
+        border-radius: 24px;
+        background:
+          radial-gradient(circle at top, rgba(67, 156, 102, 0.22), transparent 42%),
+          linear-gradient(180deg, rgba(13, 18, 22, 0.98), rgba(9, 12, 16, 0.94));
+        border: 1px solid rgba(129, 194, 152, 0.14);
+      }
+      .badge {
+        display: inline-flex; align-items: center; padding: 7px 10px; border-radius: 999px;
+        background: rgba(63, 165, 111, 0.15); color: #95edb9; font-size: 12px; font-weight: 900;
+        letter-spacing: 0.7px; text-transform: uppercase;
+      }
+      .stat { margin-top: 20px; display: grid; gap: 12px; }
+      .stat div {
+        display: flex; align-items: center; justify-content: space-between; gap: 12px;
+        padding: 12px 14px; border-radius: 16px;
+        background: rgba(11, 15, 19, 0.82);
+        border: 1px solid rgba(129, 194, 152, 0.1);
+      }
+      .stat span { color: #9bad9f; font-size: 13px; }
+      .stat strong { color: #eef4ee; font-size: 13px; }
+      .section { padding: 8px 0 56px; }
+      .section h3 {
+        margin: 0 0 14px; font-size: 15px; letter-spacing: 1.3px;
+        text-transform: uppercase; color: #84d4a5;
+      }
+      .cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+      .card {
+        padding: 20px; border-radius: 22px;
+        background: linear-gradient(180deg, rgba(12, 17, 21, 0.95), rgba(9, 12, 16, 0.95));
+        border: 1px solid rgba(129, 194, 152, 0.12);
+        min-height: 170px;
+      }
+      .card h4 { margin: 0 0 8px; font-size: 18px; color: #f0f6f1; }
+      .card p { margin: 0; color: #9bad9f; font-size: 14px; line-height: 1.65; }
+      .card a { display: inline-flex; margin-top: 14px; color: #95edb9; font-weight: 900; text-decoration: none; }
+      .legal { display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 16px; }
+      .legal .card { min-height: auto; }
+      .footer { padding: 24px 0 48px; color: #7f9286; font-size: 13px; }
+      .footer a { color: #95edb9; text-decoration: none; font-weight: 800; }
+      .footer-links { display: flex; flex-wrap: wrap; gap: 10px 18px; margin-top: 10px; }
+      @media (max-width: 860px) {
+        .hero-grid, .cards, .legal { grid-template-columns: 1fr; }
+        .topbar .inner { align-items: flex-start; flex-direction: column; }
+        .nav { justify-content: flex-start; }
+        .hero { padding-top: 40px; }
+        .hero-copy { padding: 24px; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="topbar">
+      <div class="inner">
+        <a class="brand" href="/">
+          <div class="mark">F</div>
+          <div>
+            <h1>Freeman</h1>
+            <p>Recovery, blocking, and accountability</p>
+          </div>
+        </a>
+        <nav class="nav" aria-label="Primary">
+          <a href="#features">Features</a>
+          <a href="#legal">Legal</a>
+          <a href="${escapeHtml(playStoreSearchUrl)}" target="_blank" rel="noreferrer">Google Play</a>
+        </nav>
+      </div>
+    </div>
+
+    <main class="wrap">
+      <section class="hero">
+        <div class="hero-grid">
+          <div class="panel hero-copy">
+            <div class="eyebrow">Freeman</div>
+            <h2>Official developer website for Freeman.</h2>
+            <p class="lede">
+              Freeman combines daily check-ins, urge support, content blocking, streak tracking, and a recovery-focused AI assistant in one calm interface. This site hosts the store-facing developer pages, legal pages, and app-ads.txt file AdMob crawls.
+            </p>
+            <div class="cta-row">
+              <a class="btn primary" href="${escapeHtml(playStoreSearchUrl)}" target="_blank" rel="noreferrer">Google Play</a>
+              <a class="btn secondary" href="#legal">Read the policies</a>
+            </div>
+            <div class="mini-grid">
+              <div class="mini">
+                <strong>Developer site</strong>
+                <span>Store listing contact, policy pages, and app-ads.txt live here.</span>
+              </div>
+              <div class="mini">
+                <strong>App + blocker</strong>
+                <span>One flow for the phone app, browser pairing, and content protection.</span>
+              </div>
+            </div>
+          </div>
+
+          <aside class="panel side">
+            <div class="app-card">
+              <span class="badge">Simple, cool, focused</span>
+              <div class="stat">
+                <div><span>Daily check-ins</span><strong>On device</strong></div>
+                <div><span>Content blocker</span><strong>Android VPN</strong></div>
+                <div><span>AI support</span><strong>Recovery only</strong></div>
+                <div><span>Extension</span><strong>Premium linked</strong></div>
+              </div>
+            </div>
+            <p style="margin:0;color:#9bad9f;font-size:14px;line-height:1.7;">
+              The public app listing is still coming soon, so the Google Play button points to Play search for now.
+            </p>
+          </aside>
+        </div>
+      </section>
+
+      <section id="features" class="section">
+        <h3>What it does</h3>
+        <div class="cards">
+          <div class="card">
+            <h4>Check-ins that stay simple</h4>
+            <p>Log your day, mark relapse or recovery, and keep the app focused on the next right step.</p>
+          </div>
+          <div class="card">
+            <h4>Blocking and support</h4>
+            <p>Use the content blocker and browser extension together when you want stronger protection across devices.</p>
+          </div>
+          <div class="card">
+            <h4>AI assistant</h4>
+            <p>Talk through urges, resets, and plans with a helper that stays on recovery and nothing else.</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="legal" class="section">
+        <h3>Legal</h3>
+        <div class="legal">
+          <div class="card">
+            <h4>Privacy Policy</h4>
+            <p>What Freeman stores, what stays local, what cloud services are used, and how your recovery data is handled.</p>
+            <a href="/privacy">Open Privacy Policy</a>
+          </div>
+          <div class="card">
+            <h4>Terms and Conditions</h4>
+            <p>How Freeman works, subscription rules, AI limits, acceptable use, and account responsibilities.</p>
+            <a href="/terms">Open Terms</a>
+          </div>
+          <div class="card">
+            <h4>Delete Account</h4>
+            <p>Request removal of your cloud account and pairing records through the deletion form.</p>
+            <a href="/delete-account">Request deletion</a>
+          </div>
+        </div>
+      </section>
+
+      <div class="footer">
+        Support: <a href="mailto:${escapeHtml(PRIVACY_CONTACT_EMAIL)}">${escapeHtml(PRIVACY_CONTACT_EMAIL)}</a>
+        <div class="footer-links">
+          <a href="/privacy">Privacy Policy</a>
+          <a href="/terms">Terms</a>
+          <a href="/delete-account">Delete Account</a>
+          <a href="/app-ads.txt">app-ads.txt</a>
+        </div>
+      </div>
+    </main>
+  </body>
+</html>`;
+}
+
+function appAdsTxt() {
+  return `google.com, ${ADMOB_PUBLISHER_ID}, DIRECT, f08c47fec0942fa0\n`;
+}
+
+function robotsTxt() {
+  return `User-agent: Google-adstxt\nDisallow:\n\nUser-agent: Googlebot\nDisallow:\n\nUser-agent: Mediapartners-Google\nDisallow:\n`;
+}
+
+function sitemapXml() {
+  const urls = [
+    '/',
+    '/privacy',
+    '/terms',
+    '/delete-account',
+    '/app-ads.txt',
+    '/robots.txt',
+  ];
+  const now = new Date().toISOString();
+  const entries = urls
+    .map((path) => `  <url><loc>${escapeHtml(`https://www.freemanapp.online${path}`)}</loc><lastmod>${now}</lastmod></url>`)
+    .join('\n');
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${entries}\n</urlset>\n`;
 }
 
 function extensionSetupPage(code) {
@@ -1270,7 +1583,12 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  if (req.method === 'GET' && (req.url === '/' || req.url === '/health')) {
+  if (req.method === 'GET' && req.url === '/') {
+    sendHtml(res, 200, homePage());
+    return;
+  }
+
+  if (req.method === 'GET' && req.url === '/health') {
     sendJson(res, 200, {
       ok: true,
       service: 'freeman-ai-backend',
@@ -1282,8 +1600,13 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  if (req.method === 'HEAD' && ['/privacy', '/terms', '/delete-account'].includes(req.url || '')) {
+  if (req.method === 'HEAD' && ['/', '/privacy', '/terms', '/delete-account'].includes(req.url || '')) {
     sendHtmlHead(res, 200);
+    return;
+  }
+
+  if (req.method === 'HEAD' && ['/app-ads.txt', '/robots.txt'].includes(req.url || '')) {
+    sendTextHead(res, 200);
     return;
   }
 
@@ -1299,6 +1622,33 @@ const server = http.createServer((req, res) => {
 
   if (req.method === 'GET' && req.url === '/delete-account') {
     sendHtml(res, 200, deleteAccountPage());
+    return;
+  }
+
+  if (req.method === 'GET' && req.url === '/app-ads.txt') {
+    res.writeHead(200, {
+      'Content-Type': 'text/plain; charset=utf-8',
+      'Cache-Control': 'public, max-age=3600',
+    });
+    res.end(appAdsTxt());
+    return;
+  }
+
+  if (req.method === 'GET' && req.url === '/robots.txt') {
+    res.writeHead(200, {
+      'Content-Type': 'text/plain; charset=utf-8',
+      'Cache-Control': 'public, max-age=3600',
+    });
+    res.end(robotsTxt());
+    return;
+  }
+
+  if (req.method === 'GET' && req.url === '/sitemap.xml') {
+    res.writeHead(200, {
+      'Content-Type': 'application/xml; charset=utf-8',
+      'Cache-Control': 'public, max-age=3600',
+    });
+    res.end(sitemapXml());
     return;
   }
 
