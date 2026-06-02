@@ -1,5 +1,6 @@
 const http = require('http');
 const crypto = require('crypto');
+const fs = require('fs');
 
 const PORT = Number(process.env.PORT || 8787);
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
@@ -674,7 +675,7 @@ function homePage() {
             <div class="eyebrow">Freeman</div>
             <h2>Official developer website for Freeman.</h2>
             <p class="lede">
-              Freeman combines daily check-ins, urge support, content blocking, streak tracking, and a recovery-focused AI assistant in one calm interface. This site hosts the store-facing developer pages, legal pages, and app-ads.txt file AdMob crawls.
+              Freeman combines daily check-ins, urge support, content blocking, streak tracking, and a recovery-focused AI assistant in one calm interface. This site hosts the store-facing developer pages and legal pages.
             </p>
             <div class="cta-row">
               <a class="btn primary" href="${escapeHtml(playStoreSearchUrl)}" target="_blank" rel="noreferrer">Google Play</a>
@@ -683,7 +684,7 @@ function homePage() {
             <div class="mini-grid">
               <div class="mini">
                 <strong>Developer site</strong>
-                <span>Store listing contact, policy pages, and app-ads.txt live here.</span>
+                <span>Store listing contact and policy pages live here.</span>
               </div>
               <div class="mini">
                 <strong>App + blocker</strong>
@@ -754,7 +755,6 @@ function homePage() {
           <a href="/privacy">Privacy Policy</a>
           <a href="/terms">Terms</a>
           <a href="/delete-account">Delete Account</a>
-          <a href="/app-ads.txt">app-ads.txt</a>
         </div>
       </div>
     </main>
@@ -762,12 +762,12 @@ function homePage() {
 </html>`;
 }
 
-function appAdsTxt() {
-  return `google.com, ${ADMOB_PUBLISHER_ID}, DIRECT, f08c47fec0942fa0\n`;
-}
-
-function robotsTxt() {
-  return `User-agent: Google-adstxt\nDisallow:\n\nUser-agent: Googlebot\nDisallow:\n\nUser-agent: Mediapartners-Google\nDisallow:\n`;
+function getLastModDate(filePath) {
+  try {
+    return fs.statSync(filePath).mtime.toISOString().slice(0, 10);
+  } catch {
+    return new Date().toISOString().slice(0, 10);
+  }
 }
 
 function sitemapXml() {
@@ -776,12 +776,10 @@ function sitemapXml() {
     '/privacy',
     '/terms',
     '/delete-account',
-    '/app-ads.txt',
-    '/robots.txt',
   ];
-  const now = new Date().toISOString();
+  const lastmod = getLastModDate(__filename);
   const entries = urls
-    .map((path) => `  <url><loc>${escapeHtml(`https://www.freemanapp.online${path}`)}</loc><lastmod>${now}</lastmod></url>`)
+    .map((path) => `  <url><loc>${escapeHtml(`https://www.freemanapp.online${path}`)}</loc><lastmod>${lastmod}</lastmod></url>`)
     .join('\n');
   return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${entries}\n</urlset>\n`;
 }
@@ -1605,11 +1603,6 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  if (req.method === 'HEAD' && ['/app-ads.txt', '/robots.txt'].includes(req.url || '')) {
-    sendTextHead(res, 200);
-    return;
-  }
-
   if (req.method === 'GET' && req.url === '/privacy') {
     sendHtml(res, 200, privacyPolicyPage());
     return;
@@ -1625,28 +1618,10 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  if (req.method === 'GET' && req.url === '/app-ads.txt') {
-    res.writeHead(200, {
-      'Content-Type': 'text/plain; charset=utf-8',
-      'Cache-Control': 'public, max-age=3600',
-    });
-    res.end(appAdsTxt());
-    return;
-  }
-
-  if (req.method === 'GET' && req.url === '/robots.txt') {
-    res.writeHead(200, {
-      'Content-Type': 'text/plain; charset=utf-8',
-      'Cache-Control': 'public, max-age=3600',
-    });
-    res.end(robotsTxt());
-    return;
-  }
-
   if (req.method === 'GET' && req.url === '/sitemap.xml') {
     res.writeHead(200, {
       'Content-Type': 'application/xml; charset=utf-8',
-      'Cache-Control': 'public, max-age=3600',
+      'Cache-Control': 'no-store',
     });
     res.end(sitemapXml());
     return;

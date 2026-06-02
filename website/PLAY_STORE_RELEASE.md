@@ -81,7 +81,6 @@ Prepare these before review:
 - Terms URL: `https://www.freemanapp.online/terms` or current Render URL `/terms`.
 - Account deletion URL: `https://www.freemanapp.online/delete-account` or current Render URL `/delete-account`.
 - Developer website / support URL: `https://www.freemanapp.online/`.
-- app-ads.txt URL: `https://www.freemanapp.online/app-ads.txt`.
 - Data Safety form: account info, app activity/recovery settings, diagnostics if collected.
 - VPN declaration: Freeman uses Android VPN APIs for local content filtering.
 - Foreground service declaration: content blocker foreground service.
