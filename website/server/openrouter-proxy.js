@@ -1,6 +1,7 @@
 const http = require('http');
 const crypto = require('crypto');
 const fs = require('fs');
+const path = require('path');
 
 const PORT = Number(process.env.PORT || 8787);
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
@@ -97,6 +98,20 @@ function sendHtmlHead(res, status) {
     'Cache-Control': status >= 400 ? 'no-store' : 'public, max-age=300',
   });
   res.end();
+}
+
+function sendFile(res, filePath, contentType) {
+  try {
+    const stat = fs.statSync(filePath);
+    res.writeHead(200, {
+      'Content-Type': contentType,
+      'Content-Length': stat.size,
+      'Cache-Control': 'public, max-age=86400',
+    });
+    fs.createReadStream(filePath).pipe(res);
+  } catch {
+    sendJson(res, 404, { error: 'Not found', code: 'NOT_FOUND' });
+  }
 }
 
 function sendTextHead(res, status) {
@@ -484,6 +499,7 @@ function escapeHtml(value) {
 
 function homePage() {
   const playStoreSearchUrl = 'https://play.google.com/store/search?q=Freeman&c=apps';
+  const foregroundVideoUrl = '/media/foreground-permission.mp4';
 
   return `<!doctype html>
 <html lang="en">
@@ -679,6 +695,7 @@ function homePage() {
             </p>
             <div class="cta-row">
               <a class="btn primary" href="${escapeHtml(playStoreSearchUrl)}" target="_blank" rel="noreferrer">Google Play</a>
+              <a class="btn secondary" href="${escapeHtml(foregroundVideoUrl)}" target="_blank" rel="noreferrer">Foreground service demo</a>
               <a class="btn secondary" href="#legal">Read the policies</a>
             </div>
             <div class="mini-grid">
@@ -755,6 +772,7 @@ function homePage() {
           <a href="/privacy">Privacy Policy</a>
           <a href="/terms">Terms</a>
           <a href="/delete-account">Delete Account</a>
+          <a href="${escapeHtml(foregroundVideoUrl)}">Foreground service demo</a>
         </div>
       </div>
     </main>
@@ -1624,6 +1642,28 @@ const server = http.createServer((req, res) => {
       'Cache-Control': 'no-store',
     });
     res.end(sitemapXml());
+    return;
+  }
+
+  if (req.method === 'GET' && req.url === '/media/foreground-permission.mp4') {
+    const videoPath = path.join(__dirname, '..', '..', 'foreground permission', 'IMG_20260605_095329_959.mp4');
+    sendFile(res, videoPath, 'video/mp4');
+    return;
+  }
+
+  if (req.method === 'HEAD' && req.url === '/media/foreground-permission.mp4') {
+    const videoPath = path.join(__dirname, '..', '..', 'foreground permission', 'IMG_20260605_095329_959.mp4');
+    try {
+      const stat = fs.statSync(videoPath);
+      res.writeHead(200, {
+        'Content-Type': 'video/mp4',
+        'Content-Length': stat.size,
+        'Cache-Control': 'public, max-age=86400',
+      });
+    } catch {
+      sendJsonHead(res, 404);
+    }
+    res.end();
     return;
   }
 
