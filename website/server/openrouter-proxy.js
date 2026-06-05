@@ -500,6 +500,7 @@ function escapeHtml(value) {
 function homePage() {
   const playStoreSearchUrl = 'https://play.google.com/store/search?q=Freeman&c=apps';
   const foregroundVideoUrl = '/media/foreground-permission.mp4';
+  const foregroundDemoPageUrl = '/foreground-service-demo';
 
   return `<!doctype html>
 <html lang="en">
@@ -696,6 +697,7 @@ function homePage() {
             <div class="cta-row">
               <a class="btn primary" href="${escapeHtml(playStoreSearchUrl)}" target="_blank" rel="noreferrer">Google Play</a>
               <a class="btn secondary" href="${escapeHtml(foregroundVideoUrl)}" target="_blank" rel="noreferrer">Foreground service demo</a>
+              <a class="btn secondary" href="${escapeHtml(foregroundDemoPageUrl)}">Submission page</a>
               <a class="btn secondary" href="#legal">Read the policies</a>
             </div>
             <div class="mini-grid">
@@ -773,6 +775,7 @@ function homePage() {
           <a href="/terms">Terms</a>
           <a href="/delete-account">Delete Account</a>
           <a href="${escapeHtml(foregroundVideoUrl)}">Foreground service demo</a>
+          <a href="${escapeHtml(foregroundDemoPageUrl)}">Submission page</a>
         </div>
       </div>
     </main>
@@ -794,12 +797,79 @@ function sitemapXml() {
     '/privacy',
     '/terms',
     '/delete-account',
+    '/foreground-service-demo',
   ];
   const lastmod = getLastModDate(__filename);
   const entries = urls
     .map((path) => `  <url><loc>${escapeHtml(`https://www.freemanapp.online${path}`)}</loc><lastmod>${lastmod}</lastmod></url>`)
     .join('\n');
   return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${entries}\n</urlset>\n`;
+}
+
+function foregroundServiceDemoPage() {
+  const videoUrl = '/media/foreground-permission.mp4';
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Freeman Foreground Service Demo</title>
+    <meta name="description" content="Foreground service permission demo for Freeman." />
+    <style>
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: linear-gradient(180deg, #06080d, #05070a);
+        color: #eef4ee;
+        font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+      }
+      .card {
+        width: min(920px, 100%);
+        border: 1px solid rgba(129, 194, 152, 0.14);
+        border-radius: 24px;
+        background: linear-gradient(180deg, rgba(12, 17, 21, 0.96), rgba(9, 12, 16, 0.96));
+        box-shadow: 0 28px 80px rgba(0, 0, 0, 0.42);
+        padding: 24px;
+      }
+      h1 { margin: 0 0 10px; font-size: clamp(28px, 4vw, 44px); line-height: 1.05; }
+      p { margin: 0 0 16px; color: #a9b6ae; line-height: 1.65; }
+      video {
+        width: 100%;
+        max-height: 70vh;
+        background: #000;
+        border-radius: 18px;
+        display: block;
+      }
+      .links { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 16px; }
+      a {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        text-decoration: none;
+        border-radius: 14px;
+        padding: 12px 16px;
+        font-weight: 900;
+        background: rgba(15, 20, 26, 0.9);
+        color: #dce7df;
+        border: 1px solid rgba(129, 194, 152, 0.16);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>Foreground Service Permission Demo</h1>
+      <p>This page shows the Freeman foreground service permission flow video for Play Store submission.</p>
+      <video controls playsinline preload="metadata" src="${escapeHtml(videoUrl)}"></video>
+      <div class="links">
+        <a href="${escapeHtml(videoUrl)}" target="_blank" rel="noreferrer">Open raw video</a>
+        <a href="/">Back to Freeman</a>
+      </div>
+    </div>
+  </body>
+</html>`;
 }
 
 function extensionSetupPage(code) {
@@ -1633,6 +1703,11 @@ const server = http.createServer((req, res) => {
 
   if (req.method === 'GET' && req.url === '/delete-account') {
     sendHtml(res, 200, deleteAccountPage());
+    return;
+  }
+
+  if (req.method === 'GET' && req.url === '/foreground-service-demo') {
+    sendHtml(res, 200, foregroundServiceDemoPage());
     return;
   }
 
