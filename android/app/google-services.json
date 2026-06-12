@@ -1,0 +1,56 @@
+{
+  "project_info": {
+    "project_number": "940102468451",
+    "firebase_url": "https://freeman-9e4e0-default-rtdb.firebaseio.com",
+    "project_id": "freeman-9e4e0",
+    "storage_bucket": "freeman-9e4e0.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:940102468451:android:450b84fb72d3e2b6f70956",
+        "android_client_info": {
+          "package_name": "com.freeman.recover"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "940102468451-mkvdgd0ghu2nd7ioqa10kn9folo288qq.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.freeman.recover",
+            "certificate_hash": "3c0344180f53f8533e21ea59433f545c5f6a05e0"
+          }
+        },
+        {
+          "client_id": "940102468451-p85tqavm0r4nl132n80etrsee6rvf7v1.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.freeman.recover",
+            "certificate_hash": "5e8f16062ea3cd2c4a0d547876baa6f38cabf625"
+          }
+        },
+        {
+          "client_id": "940102468451-v36707m4uu7evduv779ua973p3jh69pl.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB6XK1EQyjzkTqmfpXtfNafbc3ewNdI-sw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "940102468451-v36707m4uu7evduv779ua973p3jh69pl.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

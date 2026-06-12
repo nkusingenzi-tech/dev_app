@@ -4,6 +4,34 @@ apply plugin: "com.facebook.react"
 
 def projectRoot = rootDir.getAbsoluteFile().getParentFile().getAbsolutePath()
 
+def windowsShortPath = { File input ->
+    if (!System.getProperty("os.name").toLowerCase(Locale.ROOT).contains("windows")) {
+        return input.absolutePath
+    }
+
+    def output = new ByteArrayOutputStream()
+    exec {
+        commandLine "cmd", "/d", "/s", "/c", "for %I in (\"${input.absolutePath}\") do @echo %~sI"
+        standardOutput = output
+    }
+    return output.toString().trim() ?: input.absolutePath
+}
+
+def nativeBuildScript = file("src/main/jni/Android.mk")
+def nativeApplicationMk = file("src/main/jni/Application.mk")
+def uploadKeystoreProperties = new Properties()
+def uploadKeystorePropertiesFile = rootProject.file("upload-keystore.properties")
+if (uploadKeystorePropertiesFile.exists()) {
+    uploadKeystoreProperties.load(new FileInputStream(uploadKeystorePropertiesFile))
+}
+def releaseStoreFile = (findProperty('FREEMAN_UPLOAD_STORE_FILE') ?: uploadKeystoreProperties['FREEMAN_UPLOAD_STORE_FILE'] ?: System.getenv('FREEMAN_UPLOAD_STORE_FILE') ?: '').toString()
+def releaseStorePassword = (findProperty('FREEMAN_UPLOAD_STORE_PASSWORD') ?: uploadKeystoreProperties['FREEMAN_UPLOAD_STORE_PASSWORD'] ?: System.getenv('FREEMAN_UPLOAD_STORE_PASSWORD') ?: '').toString()
+def releaseKeyAlias = (findProperty('FREEMAN_UPLOAD_KEY_ALIAS') ?: uploadKeystoreProperties['FREEMAN_UPLOAD_KEY_ALIAS'] ?: System.getenv('FREEMAN_UPLOAD_KEY_ALIAS') ?: '').toString()
+def releaseKeyPassword = (findProperty('FREEMAN_UPLOAD_KEY_PASSWORD') ?: uploadKeystoreProperties['FREEMAN_UPLOAD_KEY_PASSWORD'] ?: System.getenv('FREEMAN_UPLOAD_KEY_PASSWORD') ?: '').toString()
+def hasReleaseSigning = releaseStoreFile && releaseStorePassword && releaseKeyAlias && releaseKeyPassword
+
+project.buildDir = file(windowsShortPath(file("build")))
+
 /**
  * This is the configuration block to customize your React Native Android app.
  * By default you don't need to apply any configuration, just uncomment the lines you need.
@@ -87,18 +115,18 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace 'com.freeman.mvp'
+    namespace 'com.freeman.recover'
     defaultConfig {
-        applicationId 'com.freeman.mvp'
+        applicationId 'com.freeman.recover'
         minSdkVersion 26
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 2
-        versionName "1.0.1"
+        versionCode 4
+        versionName "1.0.2"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
         externalNativeBuild {
             ndkBuild {
-                arguments "APP_PLATFORM=android-26"
+                arguments "APP_PLATFORM=android-26", "NDK_APPLICATION_MK=${windowsShortPath(nativeApplicationMk)}"
             }
         }
     }
@@ -109,15 +137,24 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        release {
+            if (hasReleaseSigning) {
+                storeFile file(releaseStoreFile)
+                storePassword releaseStorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
+            }
+        }
     }
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
         }
         release {
-            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
+            signingConfig hasReleaseSigning ? signingConfigs.release : signingConfigs.debug
+            if (!hasReleaseSigning) {
+                logger.warn("Release signing is using the debug keystore. Set FREEMAN_UPLOAD_* values before creating a Play Store AAB.")
+            }
             def enableShrinkResources = findProperty('android.enableShrinkResourcesInReleaseBuilds') ?: 'false'
             shrinkResources enableShrinkResources.toBoolean()
             minifyEnabled enableMinifyInReleaseBuilds
@@ -134,7 +171,8 @@ android {
     }
     externalNativeBuild {
         ndkBuild {
-            path file("src/main/jni/Android.mk")
+            path file(windowsShortPath(nativeBuildScript))
+            buildStagingDirectory file(windowsShortPath(file("build/ndkBuild")))
         }
     }
     androidResources {
@@ -190,3 +228,6 @@ dependencies {
         implementation jscFlavor
     }
 }
+
+apply plugin: 'com.google.gms.google-services'
+

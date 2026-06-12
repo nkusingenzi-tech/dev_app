@@ -1,18 +1,27 @@
-{
+﻿{
   "expo": {
     "name": "Freeman",
-    "slug": "freeman-mvp",
-    "version": "1.0.0",
+    "slug": "freeman-recovery",
+    "version": "1.0.2",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "assetBundlePatterns": [
       "**/*"
     ],
+    "plugins": [],
     "android": {
-      "package": "com.freeman.mvp"
+      "package": "com.freeman.recover",
+      "versionCode": 4,
+      "googleServicesFile": "./android/app/google-services.json",
+      "statusBar": {
+        "barStyle": "light-content",
+        "backgroundColor": "#00000000",
+        "translucent": true
+      }
     },
     "ios": {
-      "bundleIdentifier": "com.freeman.mvp"
+      "bundleIdentifier": "com.freeman.recover"
     }
   }
 }
+

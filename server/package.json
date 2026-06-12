@@ -4,6 +4,9 @@
   "private": true,
   "description": "Freeman AI OpenRouter proxy",
   "main": "openrouter-proxy.js",
+  "dependencies": {
+    "firebase-admin": "^12.7.0"
+  },
   "scripts": {
     "start": "node openrouter-proxy.js",
     "check": "node --check openrouter-proxy.js"

@@ -1,8 +1,22 @@
 import React, { useEffect, useState } from 'react';
-import { Platform, SafeAreaView, StatusBar as NativeStatusBar, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Platform, SafeAreaView, StatusBar as NativeStatusBar, StyleSheet, Text, View } from 'react-native';
 import { NativeModules } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import {
+  createUserWithEmailAndPassword,
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  signOut,
+  updateProfile,
+  GoogleAuthProvider,
+  signInWithCredential,
+  sendEmailVerification,
+} from 'firebase/auth';
+import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import { BottomTabs as BottomTabsView } from './components/BottomTabs';
+import { DailyCheckInPrompt as DailyCheckInPromptView } from './components/DailyCheckInPrompt';
+import { PostOnboardingPrompts as PostOnboardingPromptsView } from './components/PostOnboardingPrompts';
+import { AssistantScreen as AssistantScreenView } from './screens/AssistantScreen';
 import { AuthScreen as AuthScreenView } from './screens/AuthScreen';
 import { CheckInScreen as CheckInScreenView } from './screens/CheckInScreen';
 import { DashboardScreen as DashboardScreenView } from './screens/DashboardScreen';
@@ -10,8 +24,11 @@ import { LessonsScreen as LessonsScreenView } from './screens/LessonsScreen';
 import { PanicScreen as PanicScreenView } from './screens/PanicScreen';
 import { ProfileScreen as ProfileScreenView } from './screens/ProfileScreen';
 import { TreeScreen as TreeScreenView } from './screens/TreeScreen';
+import { OnboardingScreen as OnboardingScreenView, type OnboardingPlan } from './screens/OnboardingScreen';
 import type { AppModel, CheckIn, TabKey, User, WeeklyDay } from './screens/screenTypes';
-import { colors } from './theme';
+import { colors, getRankTheme } from './theme';
+import { firebaseAuth } from './lib/firebase';
+import { loadUserProfile, syncUserProfile } from './lib/profileSync';
 
 function dateKey(date = new Date()) {
   const year = date.getFullYear();
@@ -31,7 +48,7 @@ const lessons = [
   {
     title: 'The Urge Wave',
     time: '2 min',
-    body: 'An urge rises, peaks, and falls. You do not need to defeat your whole life today. You need to survive the next ten minutes.',
+    body: 'An urge rises, peaks, and falls. You do not need to defeat your whole life today. You need to survive the next ten minutes.',   
   },
   {
     title: 'Discipline Mindset',
@@ -71,9 +88,9 @@ const distractionGames = [
 
 type LocalSnapshot = {
   version: 1;
-  users: User[];
-  userId: string | null;
   checkIns: CheckIn[];
+  onboardingPlan?: OnboardingPlan | null;
+  onboardingCompleted?: boolean;
 };
 
 const localAppState = NativeModules.LocalAppState as
@@ -84,13 +101,117 @@ const localAppState = NativeModules.LocalAppState as
     }
   | undefined;
 
-export function MvpApp() {
-  const [users, setUsers] = useState<User[]>([]);
+export default function MvpApp() {
   const [user, setUser] = useState<User | null>(null);
+  const [localPendingPlan, setLocalPendingPlan] = useState<OnboardingPlan | null>(null);
+  const [localOnboardingCompleted, setLocalOnboardingCompleted] = useState(false);
   const [checkIns, setCheckIns] = useState<CheckIn[]>([]);
   const [tab, setTab] = useState<TabKey>('Dashboard');
   const [isHydrated, setIsHydrated] = useState(false);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [showCheckInPrompt, setShowCheckInPrompt] = useState(false);
+  const [postOnboardingDone, setPostOnboardingDone] = useState(false);
 
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setAuthLoading((current) => (current ? false : current));
+    }, 5000);
+
+    return () => clearTimeout(timer);
+  }, []);
+
+  // Configure Google Sign-In
+  useEffect(() => {
+    GoogleSignin.configure({
+      webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
+      offlineAccess: true,
+      forceCodeForRefreshToken: false,
+    });
+  }, []);
+
+  // Sync with Firebase Auth
+  useEffect(() => {
+    if (!firebaseAuth) {
+      setAuthLoading(false);
+      return;
+    }
+
+    return onAuthStateChanged(firebaseAuth, async (firebaseUser) => {
+      if (firebaseUser) {
+        // Force reload to get the latest emailVerified status from Firebase
+        try {
+          await firebaseUser.reload();
+        } catch (e) {
+          console.error("Failed to reload user:", e);
+        }
+
+        const freshUser = firebaseAuth.currentUser;
+        if (!freshUser) return;
+
+        // Enforce email verification for email/password users
+        if (!freshUser.emailVerified && freshUser.providerData.some(p => p.providerId === 'password')) {
+          await signOut(firebaseAuth);
+          setUser(null);
+          setAuthLoading(false);
+          return;
+        }
+
+        const baseUser: User = {
+          id: freshUser.uid,
+          authUserId: freshUser.uid,
+          authProvider: freshUser.providerData.some(p => p.providerId === 'google.com') ? 'google' : 'firebase',
+          email: freshUser.email || '',
+          username: freshUser.displayName || 'Freeman',
+          startDate: todayKey(),
+        };
+        const profile = await loadUserProfile(baseUser);
+        
+        // If the user is from Google, they are pre-verified.
+        // We also check if we should skip onboarding for them.
+        const isGoogleUser = freshUser.providerData.some(p => p.providerId === 'google.com');
+
+        if (profile.onboardingCompleted) {
+          setLocalOnboardingCompleted(true);
+        }
+        
+        // If we have a pending plan from guest onboarding, merge it now
+        if (localPendingPlan && !profile.onboardingCompleted) {
+          const updatedProfile: User = {
+            ...profile,
+            ...localPendingPlan,
+            onboardingCompleted: true,
+          };
+          // CRITICAL: Ensure this is synced to Firestore so it's not asked again
+          await syncUserProfile(updatedProfile);
+          setUser(updatedProfile);
+          setLocalPendingPlan(null);
+          setLocalOnboardingCompleted(true);
+        } else if (isGoogleUser && !profile.onboardingCompleted) {
+           // For Google users who didn't go through guest onboarding but just signed in,
+           // we might want to let them through if the app intends to skip it or 
+           // if we want to default them to "completed" to avoid the loop.
+           // However, if they truly haven't done it, we'd usually show it.
+           // The user specifically said "return to beginning... fix that so that enter directly".
+           // This implies Google users should be considered "onboarded" or 
+           // their progress should be preserved.
+           setLocalOnboardingCompleted(true); 
+           const updatedProfile: User = { ...profile, onboardingCompleted: true };
+           await syncUserProfile(updatedProfile);
+           setUser(updatedProfile);
+        } else {
+          setUser(profile);
+        }
+        
+        setShowCheckInPrompt(true);
+      } else {
+        setUser(null);
+        setShowCheckInPrompt(false);
+      }
+      setAuthLoading(false);
+    });
+  }, [localPendingPlan]);
+
+  // Hydrate local check-ins
   useEffect(() => {
     let cancelled = false;
 
@@ -108,17 +229,13 @@ export function MvpApp() {
         }
 
         const snapshot = JSON.parse(raw) as Partial<LocalSnapshot>;
-        const restoredUsers = Array.isArray(snapshot.users) ? snapshot.users : [];
         const restoredCheckIns = Array.isArray(snapshot.checkIns) ? snapshot.checkIns : [];
-        const restoredUser = snapshot.userId ? restoredUsers.find((item) => item.id === snapshot.userId) ?? null : null;
 
-        setUsers(restoredUsers);
         setCheckIns(restoredCheckIns);
-        setUser(restoredUser);
+        if (snapshot.onboardingPlan) setLocalPendingPlan(snapshot.onboardingPlan);
+        if (snapshot.onboardingCompleted) setLocalOnboardingCompleted(true);
       } catch {
-        setUsers([]);
         setCheckIns([]);
-        setUser(null);
       } finally {
         if (!cancelled) {
           setIsHydrated(true);
@@ -133,86 +250,208 @@ export function MvpApp() {
     };
   }, []);
 
+  // Save local check-ins
   useEffect(() => {
     if (!isHydrated || !localAppState) return;
 
     const snapshot: LocalSnapshot = {
       version: 1,
-      users,
-      userId: user?.id ?? null,
       checkIns,
+      onboardingPlan: localPendingPlan,
+      onboardingCompleted: localOnboardingCompleted,
     };
 
     localAppState.save(JSON.stringify(snapshot)).catch(() => {
       // Local persistence is best effort while testing.
     });
-  }, [checkIns, isHydrated, user?.id, users]);
+  }, [checkIns, isHydrated]);
 
-  function signup(email: string, password: string, username: string) {
-    const cleanEmail = email.trim().toLowerCase();
-    if (!cleanEmail || password.length < 6 || !username.trim()) {
-      return 'Enter username, valid email, and a 6+ character password.';
+  async function signup(email: string, password: string, username: string) {
+    try {
+      // Use the custom proxy for signup to utilize the SMTP/Resend server
+      const response = await fetch('https://www.freemanapp.online/api/auth/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password, username }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Signup failed');
+      }
+
+      // Automatically log them in (session will be caught by onAuthStateChanged)
+      // Note: onAuthStateChanged will handle the "not verified" check
+      await signInWithEmailAndPassword(firebaseAuth!, email, password);
+      
+      return 'Account created! Verification email sent.';
+    } catch (error: any) {
+      return error.message || 'Could not create account.';
     }
-    if (users.some((item) => item.email === cleanEmail)) {
-      return 'Account already exists. Log in instead.';
-    }
-    const nextUser: User = {
-      id: `${Date.now()}`,
-      email: cleanEmail,
-      password,
-      username: username.trim(),
-      startDate: todayKey(),
-    };
-    setUsers((current) => [...current, nextUser]);
-    setUser(nextUser);
-    return null;
   }
 
-  function login(email: string, password: string) {
-    const found = users.find((item) => item.email === email.trim().toLowerCase() && item.password === password);
-    if (!found) {
-      return 'No local account found for those credentials.';
+  async function resendVerification(email: string) {
+    try {
+      const response = await fetch('https://www.freemanapp.online/api/auth/send-verification', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || 'Could not resend verification');
+      }
+      return 'Verification email sent! Check your inbox.';
+    } catch (error: any) {
+      return error.message || 'Could not resend verification email.';
     }
-    setUser(found);
-    return null;
   }
 
-  function logout() {
+  async function login(email: string, password: string) {
+    if (!firebaseAuth) return 'Firebase not configured.';
+    try {
+      const cred = await signInWithEmailAndPassword(firebaseAuth, email, password);
+      
+      // Force reload to check if they verified their email since the last attempt
+      await cred.user.reload();
+      
+      if (!cred.user.emailVerified) {
+        await signOut(firebaseAuth);
+        return 'Please verify your email before logging in. Check your inbox.';
+      }
+      
+      return null;
+    } catch (error: any) {
+      if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
+        return 'Invalid email or password.';
+      }
+      return error.message || 'Could not log in.';
+    }
+  }
+
+  async function googleSignIn() {
+    if (!firebaseAuth) return 'Firebase not configured.';
+    try {
+      await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
+      const result = await GoogleSignin.signIn();
+      if (result.type !== 'success') {
+        return 'Google sign-in was cancelled.';
+      }
+
+      let idToken = result.data.idToken;
+      if (!idToken) {
+        const tokens = await GoogleSignin.getTokens();
+        idToken = tokens.idToken;
+      }
+
+      if (!idToken) throw new Error('No ID token found');
+      
+      const credential = GoogleAuthProvider.credential(idToken);
+      await signInWithCredential(firebaseAuth, credential);
+      return null;
+    } catch (error: any) {
+      if (error.code === '7') return 'Network error. Check your connection.';
+      if (error.code === 'DEVELOPER_ERROR') return 'Google Sign-In misconfigured (Developer Error).';
+      if (error.code === 'PLAY_SERVICES_NOT_AVAILABLE') return 'Google Play Services is missing or outdated.';
+      if (error.code === 'SIGN_IN_CANCELLED') return 'Google sign-in was cancelled.';
+      return error.message || 'Google sign-in failed.';
+    }
+  }
+
+  async function logout() {
+    if (firebaseAuth) {
+      await signOut(firebaseAuth);
+    }
     setUser(null);
     setTab('Dashboard');
+    setLocalPendingPlan(null);
   }
 
-  if (!isHydrated) {
+  if (!isHydrated || authLoading) {
     return (
       <SafeAreaView style={shellStyles.safe}>
         <StatusBar style="light" />
+        <View style={shellStyles.loadingWrap}>
+          <ActivityIndicator size="large" color={colors.gold} />
+          <Text style={shellStyles.loadingText}>Loading Freeman</Text>
+        </View>
       </SafeAreaView>
     );
   }
 
-  if (!user) {
-    return <AuthScreenView onSignup={signup} onLogin={login} />;
+  // SEQUENCE 2: Onboarding (if guest hasn't done it yet)
+  if (!user && !localOnboardingCompleted && !localPendingPlan) {
+    return (
+      <OnboardingScreenView
+        username="Freeman"
+        onComplete={(plan: OnboardingPlan) => {
+          setLocalPendingPlan(plan);
+          setLocalOnboardingCompleted(true);
+        }}
+      />
+    );
   }
+
+  // SEQUENCE 1: Auth (after onboarding or if returning user)
+  if (!user) {
+    return (
+      <AuthScreenView
+        onSignup={signup}
+        onLogin={login}
+        onGoogleSignIn={googleSignIn}
+        onResendVerification={resendVerification}
+      />
+    );
+  }
+
+  // Ensure authenticated user finishes onboarding if they skipped guest flow
+  if (!user.onboardingCompleted) {
+    return (
+      <OnboardingScreenView
+        username={user.username}
+        onComplete={async (plan: OnboardingPlan) => {
+          const nextUser: User = {
+            ...user,
+            ...plan,
+            onboardingCompleted: true,
+          };
+          await syncUserProfile(nextUser);
+          setUser(nextUser);
+        }}
+      />
+    );
+  }
+
+  // SEQUENCE 3: Main App
 
   const userCheckIns = checkIns.filter((item) => item.userId === user.id);
   const stats = calculateStats(userCheckIns);
+  const rankTheme = getRankTheme(stats.currentStreak);
 
   function completeCheckIn(relapsed: boolean, note: string, trigger?: string) {
     const date = todayKey();
     const entry: CheckIn = {
       id: `${Date.now()}`,
-      userId: user.id,
+      userId: user!.id,
       date,
       relapsed,
       note: note.trim(),
       trigger: trigger?.trim() || undefined,
     };
-    setCheckIns((current) => [...current.filter((item) => !(item.userId === user.id && item.date === date)), entry]);
+    setCheckIns((current) => [...current.filter((item) => !(item.userId === user!.id && item.date === date)), entry]);
     setTab('Dashboard');
   }
 
-  function resetStreak(note = 'Manual reset', trigger?: string) {
+  async function resetStreak(note = 'Manual reset', trigger?: string) {
     completeCheckIn(true, note, trigger);
+  }
+
+  async function updateUserProfile(updates: Partial<User>) {
+    if (!user) return;
+    const nextUser = { ...user, ...updates };
+    setUser(nextUser);
+    await syncUserProfile(nextUser);
   }
 
   const contextValue: AppModel = {
@@ -222,13 +461,25 @@ export function MvpApp() {
     longestStreak: stats.longestStreak,
     relapseCount: stats.relapseCount,
     disciplineScore: stats.disciplineScore,
+    canFinishToday: true,
+    streakFrozen: false,
+    frozenStreak: 0,
+    unfreezeCost: 0,
+    unfreezeProgress: 0,
+    canUnfreeze: false,
+    rankTheme,
     completeCheckIn,
+    reviseTodayCheckIn: completeCheckIn,
+    resolvePendingCheckIn: (_date: string, relapsed: boolean, note: string, trigger?: string) => completeCheckIn(relapsed, note, trigger),
     resetStreak,
+    unfreezeStreak: () => {},
+    updateUserProfile,
+    requestBrowserAccess: () => Promise.resolve(null),
     logout,
   };
 
   return (
-    <SafeAreaView style={shellStyles.safe}>
+    <View style={shellStyles.safe}>
       <StatusBar style="light" />
       {tab === 'Sword' ? null : (
         <View style={shellStyles.stars} pointerEvents="none">
@@ -249,14 +500,30 @@ export function MvpApp() {
       )}
       <View style={shellStyles.appBody}>
         {tab === 'Dashboard' ? <DashboardScreenView app={contextValue} goTo={setTab} lastSevenDays={lastSevenDays} topTrigger={topTrigger} formatShortDate={formatShortDate} /> : null}
-        {tab === 'Check-in' ? <CheckInScreenView app={contextValue} /> : null}
+        {tab === 'Assistant' ? <AssistantScreenView username={user.username} rankTheme={rankTheme} /> : null}
+        {tab === 'Lessons' ? <LessonsScreenView lessons={lessons} rankTheme={rankTheme} /> : null}
         {tab === 'Panic' ? <PanicScreenView app={contextValue} goTo={setTab} panicMessages={panicMessages} distractionGames={distractionGames} /> : null}
         {tab === 'Sword' ? <TreeScreenView app={contextValue} /> : null}
-        {tab === 'Lessons' ? <LessonsScreenView lessons={lessons} /> : null}
-        {tab === 'Profile' ? <ProfileScreenView app={contextValue} formatShortDate={formatShortDate} /> : null}
+        {tab === 'Profile' ? <ProfileScreenView app={contextValue} formatShortDate={formatShortDate} initialSettingsScreen={!user.contentBlockerGuideSeen ? 'contentBlockerAgreement' : null} /> : null}
       </View>
-      <BottomTabsView active={tab} onChange={setTab} />
-    </SafeAreaView>
+      <DailyCheckInPromptView
+        app={contextValue}
+        mode="start"
+        visible={showCheckInPrompt && tab === 'Dashboard'}
+        onDone={() => setShowCheckInPrompt(false)}
+      />
+      <PostOnboardingPromptsView
+        app={contextValue}
+        visible={tab === 'Dashboard' && !showCheckInPrompt}
+        onDone={() => setPostOnboardingDone(true)}
+        onAction={(action) => {
+          if (action === 'blocker') {
+            setTab('Profile');
+          }
+        }}
+      />
+      <BottomTabsView active={tab} onChange={setTab} rankTheme={rankTheme} />
+    </View>
   );
 }
 
@@ -317,5 +584,7 @@ const shellStyles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   stars: { ...StyleSheet.absoluteFillObject },
   star: { position: 'absolute', width: 2, height: 2, borderRadius: 1, backgroundColor: colors.text },
-  appBody: { flex: 1, paddingTop: Platform.OS === 'android' ? (NativeStatusBar.currentHeight ?? 0) + 10 : 0 },
+  appBody: { flex: 1 },
+  loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
+  loadingText: { color: colors.text, fontSize: 16, fontWeight: '600', letterSpacing: 0 },
 });
