@@ -1195,6 +1195,11 @@ function signEmailVerificationPayload(payload) {
 }
 
 function getRequestOrigin(req) {
+  // If we have a hardcoded continue URL, use that as the primary origin (stripping trailing slash)
+  if (AUTH_CONTINUE_URL && AUTH_CONTINUE_URL.startsWith('http')) {
+    return AUTH_CONTINUE_URL.replace(/\/$/, '');
+  }
+
   const proto = String(req.headers['x-forwarded-proto'] || 'https').split(',')[0].trim() || 'https';
   const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
   return host ? `${proto}://${host}` : 'https://freeman-ai-proxy.onrender.com';
