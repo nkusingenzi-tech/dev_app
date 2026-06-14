@@ -122,8 +122,9 @@ export default function MvpApp() {
 
   // Configure Google Sign-In
   useEffect(() => {
+    const webClientId = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || '940102468451-v36707m4uu7evduv779ua973p3jh69pl.apps.googleusercontent.com';
     GoogleSignin.configure({
-      webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
+      webClientId,
       offlineAccess: true,
       forceCodeForRefreshToken: false,
     });
@@ -170,7 +171,7 @@ export default function MvpApp() {
         // We also check if we should skip onboarding for them.
         const isGoogleUser = freshUser.providerData.some(p => p.providerId === 'google.com');
 
-        if (profile.onboardingCompleted) {
+        if (profile.onboardingCompleted || localOnboardingCompleted) {
           setLocalOnboardingCompleted(true);
         }
         
@@ -186,14 +187,8 @@ export default function MvpApp() {
           setUser(updatedProfile);
           setLocalPendingPlan(null);
           setLocalOnboardingCompleted(true);
-        } else if (isGoogleUser && !profile.onboardingCompleted) {
-           // For Google users who didn't go through guest onboarding but just signed in,
-           // we might want to let them through if the app intends to skip it or 
-           // if we want to default them to "completed" to avoid the loop.
-           // However, if they truly haven't done it, we'd usually show it.
-           // The user specifically said "return to beginning... fix that so that enter directly".
-           // This implies Google users should be considered "onboarded" or 
-           // their progress should be preserved.
+        } else if ((isGoogleUser || localOnboardingCompleted) && !profile.onboardingCompleted) {
+           // For Google users or users who already did local onboarding
            setLocalOnboardingCompleted(true); 
            const updatedProfile: User = { ...profile, onboardingCompleted: true };
            await syncUserProfile(updatedProfile);
@@ -209,7 +204,7 @@ export default function MvpApp() {
       }
       setAuthLoading(false);
     });
-  }, [localPendingPlan]);
+  }, [localPendingPlan, localOnboardingCompleted]);
 
   // Hydrate local check-ins
   useEffect(() => {
@@ -351,8 +346,11 @@ export default function MvpApp() {
       await signInWithCredential(firebaseAuth, credential);
       return null;
     } catch (error: any) {
+      console.error('Google Sign-In Error:', error);
       if (error.code === '7') return 'Network error. Check your connection.';
-      if (error.code === 'DEVELOPER_ERROR') return 'Google Sign-In misconfigured (Developer Error).';
+      if (error.code === 'DEVELOPER_ERROR') {
+        return `Developer Error: Verify SHA-1 in Firebase. (Code: ${error.code})`;
+      }
       if (error.code === 'PLAY_SERVICES_NOT_AVAILABLE') return 'Google Play Services is missing or outdated.';
       if (error.code === 'SIGN_IN_CANCELLED') return 'Google sign-in was cancelled.';
       return error.message || 'Google sign-in failed.';
@@ -406,7 +404,7 @@ export default function MvpApp() {
   }
 
   // Ensure authenticated user finishes onboarding if they skipped guest flow
-  if (!user.onboardingCompleted) {
+  if (!user.onboardingCompleted && !localOnboardingCompleted) {
     return (
       <OnboardingScreenView
         username={user.username}
@@ -418,6 +416,7 @@ export default function MvpApp() {
           };
           await syncUserProfile(nextUser);
           setUser(nextUser);
+          setLocalOnboardingCompleted(true);
         }}
       />
     );
