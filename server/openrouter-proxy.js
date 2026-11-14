@@ -256,7 +256,7 @@ function legalPage({ title, updated, children }) {
 function privacyPolicyPage() {
   return legalPage({
     title: 'Privacy Policy',
-    updated: 'May 23, 2026',
+    updated: 'November 14, 2026',
     children: `
       <div class="card">
         <p>This Privacy Policy explains how Freeman ("Freeman", "the app", "we", "our", or "us") collects, uses, stores, and shares information when you use the Freeman mobile app, Freeman browser extension, and related backend services.</p>
@@ -264,6 +264,7 @@ function privacyPolicyPage() {
       </div>
 
       <h2>Developer and privacy contact</h2>
+      <p>Developer name on Google Play: A&amp;C Solutions.</p>
       <p>For privacy questions, account deletion, or data requests, contact us at <a href="mailto:${escapeHtml(PRIVACY_CONTACT_EMAIL)}">${escapeHtml(PRIVACY_CONTACT_EMAIL)}</a>.</p>
 
       <h2>Information Freeman collects or stores</h2>
