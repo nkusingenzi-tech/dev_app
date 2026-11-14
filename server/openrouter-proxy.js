@@ -418,11 +418,11 @@ function termsPage() {
 function deleteAccountPage(message = '') {
   return legalPage({
     title: 'Delete Account',
-    updated: 'May 23, 2026',
+    updated: 'November 14, 2026',
     children: `
       ${message ? `<div class="card"><p>${escapeHtml(message)}</p></div>` : ''}
       <div class="card">
-        <p>Use this page to request deletion of your Freeman account and associated cloud data. This is the web deletion request option required for users who created an account in the app.</p>
+        <p>This account deletion page is for Freeman-Quit gooning and porn (the Freeman app), published on Google Play by A&amp;C Solutions. Use it to request deletion of your Freeman account and associated cloud data.</p>
       </div>
 
       <h2>What deletion includes</h2>
